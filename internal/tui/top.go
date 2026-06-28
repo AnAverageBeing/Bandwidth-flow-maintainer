@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"math"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -13,24 +14,36 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
 var (
-	topBorder   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#7B68EE")).Padding(0, 1)
-	topHeader   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#4A4A6A"))
-	topSelected = lipgloss.NewStyle().Background(lipgloss.Color("#5A5A8A"))
-	topGreen    = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00"))
-	topYellow   = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFD700"))
-	topRed      = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4500"))
-	topCyan     = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FFFF"))
-	topMuted    = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
-	topTitleBar = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#7B68EE")).Padding(0, 1).Width(70)
-	topBtn      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#000000")).Background(lipgloss.Color("#7B68EE")).Padding(0, 1)
-	topBtnMuted = lipgloss.NewStyle().Foreground(lipgloss.Color("#CCCCCC")).Background(lipgloss.Color("#3A3A5A")).Padding(0, 1)
-	topBtnGreen = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#000000")).Background(lipgloss.Color("#00FF00")).Padding(0, 1)
-	topBtnRed   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#FF0000")).Padding(0, 1)
+	tuiPurple   = lipgloss.Color("#7B68EE")
+	tuiDkPurple = lipgloss.Color("#3A3A5A")
+	tuiGreen    = lipgloss.Color("#00FF00")
+	tuiRed      = lipgloss.Color("#FF4500")
+	tuiYellow   = lipgloss.Color("#FFD700")
+	tuiCyan     = lipgloss.Color("#00FFFF")
+	tuiWhite    = lipgloss.Color("#FFFFFF")
+	tuiMuted    = lipgloss.Color("#666666")
+
+	topBar    = lipgloss.NewStyle().Bold(true).Foreground(tuiWhite).Background(tuiPurple).Padding(0, 1)
+	topHeader = lipgloss.NewStyle().Bold(true).Foreground(tuiWhite).Background(tuiDkPurple)
+	topSel    = lipgloss.NewStyle().Background(lipgloss.Color("#5A5A8A"))
+	topGreen  = lipgloss.NewStyle().Foreground(tuiGreen)
+	topRed    = lipgloss.NewStyle().Foreground(tuiRed)
+	topYellow = lipgloss.NewStyle().Foreground(tuiYellow)
+	topCyan   = lipgloss.NewStyle().Foreground(tuiCyan)
+	topMuted  = lipgloss.NewStyle().Foreground(tuiMuted)
+	topBtn    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#000")).Background(tuiPurple).Padding(0, 1)
+	topBtnOff = lipgloss.NewStyle().Foreground(lipgloss.Color("#AAA")).Background(tuiDkPurple).Padding(0, 1)
+	topBtnRed = lipgloss.NewStyle().Bold(true).Foreground(tuiWhite).Background(tuiRed).Padding(0, 1)
+	topPanel  = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(tuiPurple).Padding(0, 1)
+	topGraph  = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(tuiPurple).Padding(1, 1)
 )
 
 type topTickMsg time.Time
 
+// TopModel is the bandwidth top TUI with graphs.
 type TopModel struct {
 	width, height    int
 	mode             string
@@ -44,6 +57,11 @@ type TopModel struct {
 	peakRX, peakTX   float64
 	lastRefresh      time.Time
 	quitting, help   bool
+
+	// Graph history: up to 120 data points (2 min at 1s refresh, or 4 min at 2s)
+	rxHistory  map[string][]float64
+	txHistory  map[string][]float64
+	maxHistory int
 }
 
 type topEntry struct {
@@ -64,7 +82,13 @@ type topRefreshMsg struct {
 }
 
 func NewTopModel() TopModel {
-	return TopModel{mode: "all", period: "5m", sortBy: "total", help: true, lastRefresh: time.Now()}
+	return TopModel{
+		mode: "all", period: "5m", sortBy: "total", help: true,
+		lastRefresh: time.Now(),
+		rxHistory:   make(map[string][]float64),
+		txHistory:   make(map[string][]float64),
+		maxHistory:  80,
+	}
 }
 
 func (m TopModel) Init() tea.Cmd {
@@ -72,7 +96,7 @@ func (m TopModel) Init() tea.Cmd {
 }
 
 func topTickCmd() tea.Cmd {
-	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return topTickMsg(t) })
+	return tea.Tick(1*time.Second, func(t time.Time) tea.Msg { return topTickMsg(t) })
 }
 
 func (m TopModel) topRefreshCmd() tea.Cmd {
@@ -115,8 +139,8 @@ func (m TopModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
 			return m, nil
 		}
-		// Bottom button bar (height-2)
-		if msg.Y == m.height-2 || msg.Y == m.height-1 {
+		bottomY := m.height - 2
+		if msg.Y == bottomY {
 			switch {
 			case msg.X < 20:
 				if m.mode == "all" {
@@ -153,7 +177,6 @@ func (m TopModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 		}
-		// Click on entry rows (y >= 4)
 		rowY := msg.Y - 4
 		if rowY >= 0 && rowY < len(m.entries) {
 			m.selected = rowY
@@ -177,6 +200,14 @@ func (m TopModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.selected < len(m.entries)-1 {
 				m.selected++
 			}
+			return m, nil
+		case "left":
+			if m.selected == 0 {
+				return m, nil
+			}
+			// Show graph toggle? For now just move selection
+			return m, nil
+		case "right":
 			return m, nil
 		case "tab":
 			if m.mode == "all" {
@@ -220,6 +251,18 @@ func (m TopModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.avgRX, m.avgTX = msg.avgRX, msg.avgTX
 		m.p95RX, m.p95TX = msg.p95RX, msg.p95TX
 		m.peakRX, m.peakTX = msg.peakRX, msg.peakTX
+
+		// Update history
+		for _, e := range m.entries {
+			m.rxHistory[e.Name] = append(m.rxHistory[e.Name], e.RXMbps)
+			m.txHistory[e.Name] = append(m.txHistory[e.Name], e.TXMbps)
+			if len(m.rxHistory[e.Name]) > m.maxHistory {
+				m.rxHistory[e.Name] = m.rxHistory[e.Name][len(m.rxHistory[e.Name])-m.maxHistory:]
+			}
+			if len(m.txHistory[e.Name]) > m.maxHistory {
+				m.txHistory[e.Name] = m.txHistory[e.Name][len(m.txHistory[e.Name])-m.maxHistory:]
+			}
+		}
 		return m, nil
 	}
 	return m, nil
@@ -229,30 +272,41 @@ func (m TopModel) View() string {
 	if m.quitting {
 		return "\n"
 	}
-
 	var sb strings.Builder
 
 	// Title
 	modeLabel := "🐳 Docker Only"
 	if m.mode == "all" {
-		modeLabel = "🌐 All Apps"
+		modeLabel = "🌐 All Interfaces + Docker"
 	}
-	sb.WriteString(topTitleBar.Render(fmt.Sprintf("⚡ Bandwidth Top — %s", modeLabel)))
+	sb.WriteString(topBar.Render(fmt.Sprintf("⚡ Bandwidth Top — %s  [%d entries]", modeLabel, len(m.entries))))
 	sb.WriteString("\n\n")
 
-	// Total gauge
+	// Total
 	total := m.totalRX + m.totalTX
-	bar := topBuildGauge(total, 1000, 40)
-	sb.WriteString(fmt.Sprintf("  Total: %s ↓  %s ↑  [%s]\n\n", humanMbps(m.totalRX), humanMbps(m.totalTX), bar))
+	gauge := topBuildGauge(total, float64(len(m.entries))*200+1, 30)
+	sb.WriteString(fmt.Sprintf(" Total: %s↓  %s↑  [%s]\n\n", humanMbps(m.totalRX), humanMbps(m.totalTX), gauge))
 
-	// Header
-	sb.WriteString(topHeader.Render(fmt.Sprintf("  %-4s %-24s %-8s %10s %10s %10s", "#", "NAME", "TYPE", "RX", "TX", "TOTAL")))
-	sb.WriteString("\n")
+	// Split view: list on left, graph on right
+	listWidth := 45
+	if m.width > 100 {
+		listWidth = 50
+	}
+	if m.width > 130 {
+		listWidth = 55
+	}
+	graphWidth := m.width - listWidth - 3
+	if graphWidth < 30 {
+		graphWidth = 30
+	}
 
-	// Entries
+	// Left panel: list
+	hdr := fmt.Sprintf("%-4s %-*s %5s %5s %5s", "#", listWidth-22, "NAME", "RX", "TX", "TOT")
+	leftContent := topHeader.Render(" "+hdr) + "\n"
+
 	maxRows := m.height - 14
-	if maxRows < 5 {
-		maxRows = 20
+	if maxRows < 3 {
+		maxRows = 10
 	}
 	for i, e := range m.entries {
 		if i >= maxRows {
@@ -265,56 +319,189 @@ func (m TopModel) View() string {
 		if e.TotalMbps > 500 {
 			c = topRed
 		}
-		row := fmt.Sprintf("  %-4d %-24s %-8s %10s %10s %10s",
-			i+1, topTrunc(e.Name, 24), e.Type,
-			humanMbps(e.RXMbps), humanMbps(e.TXMbps), humanMbps(e.TotalMbps))
+		nameW := listWidth - 22
+		row := fmt.Sprintf(" %-4d %-*s %5s %5s %5s",
+			i+1, nameW, topTrunc(e.Name, nameW), humanMbpsShort(e.RXMbps), humanMbpsShort(e.TXMbps), humanMbpsShort(e.TotalMbps))
 		if i == m.selected {
-			row = topSelected.Render(row)
+			row = topSel.Render(row)
 		} else {
 			row = c.Render(row)
 		}
-		sb.WriteString(row + "\n")
+		leftContent += row + "\n"
 	}
 
-	sb.WriteString("\n")
+	// Fill remaining rows
+	for i := len(m.entries); i < maxRows; i++ {
+		leftContent += "\n"
+	}
 
-	// Stats panel
-	stats := fmt.Sprintf("Stats [%s] │ Avg: %s↓ %s↑ │ 95th: %s↓ %s↑ │ Peak: %s↓ %s↑ │ %d entries",
+	// Right panel: graph for selected entry
+	rightContent := ""
+	if m.selected >= 0 && m.selected < len(m.entries) {
+		sel := m.entries[m.selected]
+		rxData := m.rxHistory[sel.Name]
+		txData := m.txHistory[sel.Name]
+
+		graphH := maxRows - 2
+		if graphH < 5 {
+			graphH = 5
+		}
+
+		rightContent = topGraph.Width(graphWidth).Render(
+			topBar.Render(fmt.Sprintf(" %s ", topTrunc(sel.Name, graphWidth-4))) + "\n" +
+				fmt.Sprintf(" ↓%s  ↑%s  Total: %s\n", humanMbps(sel.RXMbps), humanMbps(sel.TXMbps), humanMbps(sel.TotalMbps)) +
+				drawSparkGraph(rxData, txData, graphWidth-4, graphH) + "\n" +
+				topGreen.Render("── RX (inbound)") + "  " + topRed.Render("── TX (outbound)"),
+		)
+	} else {
+		rightContent = topGraph.Width(graphWidth).Render(topMuted.Render("Select an entry to see graph"))
+	}
+
+	// Render left + right side by side
+	leftLines := strings.Split(leftContent, "\n")
+	rightLines := strings.Split(rightContent, "\n")
+	for i := 0; i < maxRows+2; i++ {
+		l := ""
+		if i < len(leftLines) {
+			l = leftLines[i]
+		}
+		r := ""
+		if i < len(rightLines) {
+			r = rightLines[i]
+		}
+		// Pad left to listWidth
+		lp := l + strings.Repeat(" ", max(0, listWidth-lipglossWidth(l)))
+		sb.WriteString(lp + " " + r + "\n")
+	}
+
+	// Stats
+	sb.WriteString("\n")
+	stats := fmt.Sprintf("Stats [%s] │ Avg: %s↓ %s↑ │ 95th: %s↓ %s↑ │ Peak: %s↓ %s↑",
 		m.period,
 		humanMbps(m.avgRX), humanMbps(m.avgTX),
 		humanMbps(m.p95RX), humanMbps(m.p95TX),
-		humanMbps(m.peakRX), humanMbps(m.peakTX),
-		len(m.entries))
-	sb.WriteString(topBorder.Render(stats))
+		humanMbps(m.peakRX), humanMbps(m.peakTX))
+	sb.WriteString(topPanel.Render(stats))
 	sb.WriteString("\n\n")
 
 	// Button bar
-	modeBtn := topBtn.Render(" [Tab] All/Docker ")
-	sortBtn := topBtnMuted.Render(" [s] Sort ")
-	p1Btn := topBtnMuted.Render(" [1] 1m ")
-	p5Btn := topBtnMuted.Render(" [5] 5m ")
-	phBtn := topBtnMuted.Render(" [h] 1h ")
-	pdBtn := topBtnMuted.Render(" [d] 24h ")
-	quitBtn := topBtnRed.Render(" [q] Quit ")
-
-	// Highlight current period
+	modeBtn := topBtn.Render("[Tab] All/Docker")
+	sortBtn := topBtnOff.Render("[s] Sort")
+	p1 := topBtnOff.Render("[1]1m")
+	p5 := topBtnOff.Render("[5]5m")
+	ph := topBtnOff.Render("[h]1h")
+	pd := topBtnOff.Render("[d]24h")
+	qBtn := topBtnRed.Render("[q] Quit")
 	switch m.period {
 	case "1m":
-		p1Btn = topBtn.Render(" [1] 1m ")
+		p1 = topBtn.Render("[1]1m")
 	case "5m":
-		p5Btn = topBtn.Render(" [5] 5m ")
+		p5 = topBtn.Render("[5]5m")
 	case "1h":
-		phBtn = topBtn.Render(" [h] 1h ")
+		ph = topBtn.Render("[h]1h")
 	case "24h":
-		pdBtn = topBtn.Render(" [d] 24h ")
+		pd = topBtn.Render("[d]24h")
 	}
-
-	sb.WriteString(modeBtn + sortBtn + p1Btn + p5Btn + phBtn + pdBtn + quitBtn)
-	if m.help {
-		sb.WriteString("\n" + topMuted.Render("  Click buttons or use keys: ↑↓ Navigate  Tab Toggle  s Sort  1/5/h/d Period  q Quit"))
-	}
+	sb.WriteString(modeBtn + sortBtn + p1 + p5 + ph + pd + qBtn)
+	sb.WriteString("\n" + topMuted.Render("↑↓ choose  Tab toggle  s sort  1/5/h/d period  q quit  ? help"))
 
 	return sb.String()
+}
+
+// ─── Sparkline Graph ──────────────────────────────────────────────────────────
+
+func drawSparkGraph(rx, tx []float64, width, height int) string {
+	if len(rx) == 0 && len(tx) == 0 {
+		return topMuted.Render("collecting data...")
+	}
+	// Find max for scaling
+	maxVal := 0.0
+	for _, v := range rx {
+		if v > maxVal {
+			maxVal = v
+		}
+	}
+	for _, v := range tx {
+		if v > maxVal {
+			maxVal = v
+		}
+	}
+	if maxVal < 0.1 {
+		maxVal = 1
+	}
+	maxVal *= 1.1 // 10% headroom
+
+	// Combine data into a single slice for rendering
+	combined := make([]float64, max(len(rx), len(tx)))
+	copy(combined, rx)
+
+	// Build grid
+	grid := make([][]rune, height)
+	for y := 0; y < height; y++ {
+		grid[y] = make([]rune, width)
+		for x := 0; x < width; x++ {
+			grid[y][x] = ' '
+		}
+	}
+
+	// Plot RX (green ░ characters)
+	plotLine(grid, rx, maxVal, width, height, '░', tuiGreen)
+	// Plot TX (red ░ characters)
+	plotLine(grid, tx, maxVal, width, height, '▒', tuiRed)
+
+	// Render
+	var sb strings.Builder
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			ch := grid[y][x]
+			if ch == '░' {
+				sb.WriteString(topGreen.Render(string('▄')))
+			} else if ch == '▒' {
+				sb.WriteString(topRed.Render(string('▄')))
+			} else if ch == '█' {
+				// Overlap: show yellow
+				sb.WriteString(topYellow.Render(string('▄')))
+			} else {
+				sb.WriteRune(' ')
+			}
+		}
+		sb.WriteRune('\n')
+	}
+
+	// Scale labels
+	_ = combined
+	sb.WriteString(topMuted.Render(fmt.Sprintf(" %s", humanMbps(maxVal))))
+	sb.WriteString(strings.Repeat(" ", width-15))
+	sb.WriteString(topMuted.Render(fmt.Sprintf("0 ")))
+
+	return sb.String()
+}
+
+func plotLine(grid [][]rune, data []float64, maxVal float64, width, height int, ch rune, color lipgloss.Color) {
+	if len(data) == 0 {
+		return
+	}
+	step := float64(len(data)) / float64(width-1)
+	for x := 0; x < width; x++ {
+		idx := int(float64(x) * step)
+		if idx >= len(data) {
+			idx = len(data) - 1
+		}
+		val := data[idx]
+		y := height - 1 - int(math.Round(val/maxVal*float64(height-1)))
+		if y < 0 {
+			y = 0
+		}
+		if y >= height {
+			y = height - 1
+		}
+		existing := grid[y][x]
+		if existing == ' ' {
+			grid[y][x] = ch
+		} else if existing != ch {
+			grid[y][x] = '█' // overlap marker
+		}
+	}
 }
 
 // ─── Human Readable ───────────────────────────────────────────────────────────
@@ -332,17 +519,20 @@ func humanMbps(mbps float64) string {
 	return "0"
 }
 
-func humanBytes(b float64) string {
-	if b >= 1e9 {
-		return fmt.Sprintf("%.2fGB", b/1e9)
+func humanMbpsShort(mbps float64) string {
+	if mbps >= 1000 {
+		return fmt.Sprintf("%.1fG", mbps/1000)
 	}
-	if b >= 1e6 {
-		return fmt.Sprintf("%.1fMB", b/1e6)
+	if mbps >= 10 {
+		return fmt.Sprintf("%.0fM", mbps)
 	}
-	if b >= 1e3 {
-		return fmt.Sprintf("%.0fKB", b/1e3)
+	if mbps >= 1 {
+		return fmt.Sprintf("%.1fM", mbps)
 	}
-	return fmt.Sprintf("%.0fB", b)
+	if mbps >= 0.01 {
+		return fmt.Sprintf("%.0fK", mbps*1000)
+	}
+	return "0"
 }
 
 // ─── Data Collection ──────────────────────────────────────────────────────────
@@ -359,7 +549,7 @@ func topCollect(mode string) []topEntry {
 }
 
 func topDockerStats() []topEntry {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "docker", "stats", "--no-stream", "--format", "{{.Name}}\t{{.NetIO}}")
 	out, err := cmd.CombinedOutput()
@@ -505,4 +695,26 @@ func topTrunc(s string, max int) string {
 		return s
 	}
 	return s[:max-3] + "..."
+}
+
+func lipglossWidth(s string) int {
+	// Approximate width by stripping ANSI codes
+	clean := lipgloss.NewStyle().Render(s)
+	// Simple: count runes ignoring ANSI
+	count := 0
+	inEscape := false
+	for _, r := range clean {
+		if r == '\x1b' {
+			inEscape = true
+			continue
+		}
+		if inEscape {
+			if r == 'm' {
+				inEscape = false
+			}
+			continue
+		}
+		count++
+	}
+	return count
 }
