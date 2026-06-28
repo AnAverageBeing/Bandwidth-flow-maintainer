@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -49,6 +51,15 @@ type Daemon struct {
 	socketLn  net.Listener
 }
 
+// generateToken creates a cryptographically random 32-byte hex token.
+func generateToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate token: %w", err)
+	}
+	return hex.EncodeToString(b), nil
+}
+
 // New creates and initializes all subsystems from configuration.
 func New(cfg *config.Config) (*Daemon, error) {
 	// Logger
@@ -78,6 +89,21 @@ func New(cfg *config.Config) (*Daemon, error) {
 		return nil, fmt.Errorf("daemon: database: %w", err)
 	}
 	l.Info("daemon: database opened at %s", cfg.Database.Path)
+
+	// Auto-generate API token if enabled and not set
+	if cfg.API.Enabled && cfg.API.AuthToken == "" {
+		token, err := generateToken()
+		if err != nil {
+			l.Warn("daemon: failed to generate API token: %v", err)
+		} else {
+			cfg.API.AuthToken = token
+			l.Info("daemon: auto-generated API token (saved to config)")
+			// Persist the token to config file so it survives restarts
+			if err := config.Save(cfg, "/etc/bandwidth/config.yaml"); err != nil {
+				l.Warn("daemon: failed to save API token to config: %v", err)
+			}
+		}
+	}
 
 	// Docker discovery
 	discCfg := docker.Config{
@@ -194,6 +220,15 @@ func New(cfg *config.Config) (*Daemon, error) {
 // Start begins the main daemon loop.
 func (d *Daemon) Start(ctx context.Context) error {
 	d.log.Info("daemon: starting bandwidth manager v1.0.0")
+
+	// Print API token prominently if API is enabled
+	if d.cfg.API.Enabled && d.cfg.API.AuthToken != "" {
+		d.log.Info("══════════════════════════════════════════════")
+		d.log.Info("  API TOKEN: %s", d.cfg.API.AuthToken)
+		d.log.Info("  Use: curl -H 'Authorization: Bearer %s' http://localhost:%d/api/v1/health", d.cfg.API.AuthToken, d.cfg.API.TCPPort)
+		d.log.Info("  Change via config: api.auth_token in /etc/bandwidth/config.yaml")
+		d.log.Info("══════════════════════════════════════════════")
+	}
 
 	// Send startup webhook
 	d.whMgr.Send(models.EventDaemonStarted, "", "Bandwidth manager daemon started", "info")

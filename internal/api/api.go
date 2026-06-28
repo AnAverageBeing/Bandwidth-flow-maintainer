@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -86,6 +87,7 @@ func (s *Server) Start(ctx context.Context) error {
 			s.log.Warn("api: unix socket %s: %v", s.config.SocketPath, err)
 		} else {
 			listeners = append(listeners, unixLn)
+			os.Chmod(s.config.SocketPath, 0666)
 			s.log.Info("api: listening on unix://%s", s.config.SocketPath)
 		}
 	}
