@@ -1,0 +1,40 @@
+# Binaries
+/bandwidth
+/bandwidthd
+/bin/
+/build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+/var/log/
+
+# Database
+*.db
+*.sqlite
+/var/lib/
+
+# Config (keep example only)
+/config.yaml
+
+# Test coverage
+*.out
+*.test
+/coverage/
+
+# Vendor
+/vendor/
+
+# Temporary
+/tmp/
+/temp/

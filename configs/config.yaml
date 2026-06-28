@@ -1,0 +1,201 @@
+# =============================================================================
+# Bandwidth Manager Configuration
+# Production-grade Docker bandwidth management system
+# =============================================================================
+
+general:
+  socket_path: /var/run/bandwidth.sock
+  lock_file: /var/run/bandwidth.lock
+  pid_file: /var/run/bandwidth.pid
+
+# ---------------------------------------------------------------------------
+# Logging: Structured logging with rotation support
+# ---------------------------------------------------------------------------
+logging:
+  level: info                    # debug, info, warn, error
+  console: true                  # Print to stdout
+  file: /var/log/bandwidth/bandwidth.log
+  max_size_mb: 100               # Rotate after 100 MB
+  max_age_days: 30               # Keep logs for 30 days
+  max_backups: 10                # Keep 10 rotated files
+  compress: true                 # gzip rotated logs
+  format: json                   # text or json
+
+# ---------------------------------------------------------------------------
+# Database: SQLite with WAL mode for performance
+# ---------------------------------------------------------------------------
+database:
+  path: /var/lib/bandwidth/bandwidth.db
+  max_open_conns: 1              # SQLite is single-writer
+  max_idle_conns: 1
+  journal_mode: WAL              # Write-Ahead Logging
+  synchronous: NORMAL            # Balance safety/performance
+  cache_size_kb: 32000           # 32 MB cache
+  auto_migrate: true
+
+# ---------------------------------------------------------------------------
+# Docker: Container discovery settings
+# ---------------------------------------------------------------------------
+docker:
+  endpoint: unix:///var/run/docker.sock
+  api_version: "1.44"
+  tls_verify: false
+  tls_cert_path: ""
+  discovery_interval: 10s        # Full scan interval
+  watch_events: true             # Listen for Docker events
+
+# ---------------------------------------------------------------------------
+# Bandwidth: Default speed limits and monitoring
+# ---------------------------------------------------------------------------
+bandwidth:
+  default_rx_mbps: 100           # Default download limit
+  default_tx_mbps: 100           # Default upload limit
+  default_ceil_mbps: 200         # Maximum burst ceiling
+  default_burst_mbps: 150        # Token bucket burst size
+  poll_interval: 5s              # Stats collection interval
+
+# ---------------------------------------------------------------------------
+# Quota: Daily traffic quotas and throttling
+# ---------------------------------------------------------------------------
+quota:
+  default_quota_gb: 500          # Default daily quota
+  exceeded_speed_rx_mbps: 1      # Throttle download to 1 Mbps when exceeded
+  exceeded_speed_tx_mbps: 1      # Throttle upload to 1 Mbps when exceeded
+  warning_percent: 90            # Notify at 90% usage
+  disconnect_on_exceeded: false  # If true, kill bandwidth; if false, throttle
+
+# ---------------------------------------------------------------------------
+# Webhook: Discord/Slack/generic notifications
+# ---------------------------------------------------------------------------
+webhook:
+  enabled: false
+  max_retries: 3
+  backoff_base: 5s
+  queue_size: 10000
+  persist_queue: true            # Store failed webhooks in DB
+  endpoints:
+    # - name: discord
+    #   url: https://discord.com/api/webhooks/...
+    #   type: discord
+    #   enabled: true
+    # - name: slack
+    #   url: https://hooks.slack.com/services/...
+    #   type: slack
+    #   enabled: true
+
+# ---------------------------------------------------------------------------
+# Scheduler: Internal job scheduler (no cron required)
+# ---------------------------------------------------------------------------
+scheduler:
+  enabled: true
+  reset_cron: "0 0 * * *"        # Daily quota reset at midnight
+  cleanup_cron: "0 */6 * * *"    # Cleanup every 6 hours
+  history_cron: "5 0 * * *"      # History rollup at 00:05
+  health_cron: "*/5 * * * *"     # Health check every 5 minutes
+  webhook_retry_cron: "*/1 * * * *"  # Retry failed webhooks every minute
+  check_interval: 30s
+
+# ---------------------------------------------------------------------------
+# Status: Status tracking
+# ---------------------------------------------------------------------------
+status:
+  history_size: 1000
+  update_interval: 10s
+
+# ---------------------------------------------------------------------------
+# History: Historical usage records and export
+# ---------------------------------------------------------------------------
+history:
+  enabled: true
+  retention_days: 365            # Keep 1 year of history
+  rollup_interval: 1h
+  export_enabled: false
+  export_path: /var/lib/bandwidth/exports
+
+# ---------------------------------------------------------------------------
+# Cleanup: Automatic stale record removal
+# ---------------------------------------------------------------------------
+cleanup:
+  enabled: true
+  interval: 1h
+  stale_container_hours: 72     # Remove containers unseen for 3 days
+  remove_tc_rules: true          # Also remove tc rules
+  compact_db: true               # VACUUM SQLite
+
+# ---------------------------------------------------------------------------
+# Metrics: Prometheus metrics endpoint
+# ---------------------------------------------------------------------------
+metrics:
+  enabled: false
+  port: 9090
+  path: /metrics
+
+# ---------------------------------------------------------------------------
+# API: Optional REST API
+# ---------------------------------------------------------------------------
+api:
+  enabled: false
+  socket_path: /var/run/bandwidth-api.sock
+  tcp_port: 0                    # 0 = disabled
+  auth_token: ""                 # Empty = no auth
+  read_only: true
+
+# ---------------------------------------------------------------------------
+# TUI: Terminal UI settings
+# ---------------------------------------------------------------------------
+tui:
+  refresh_interval: 2s
+  default_sort: name
+  max_containers: 500
+  color_theme: default
+
+# ---------------------------------------------------------------------------
+# Rate Limiter: Token bucket rate smoothing
+# ---------------------------------------------------------------------------
+rate_limiter:
+  enabled: true
+  peak_burst_seconds: 10         # Allow 10 seconds of burst
+  sustained_rate_factor: 0.8     # 80% of limit as sustained rate
+  recovery_window: 30s           # Time to recover burst tokens
+  grace_window: 5s               # Initial grace period
+
+# ---------------------------------------------------------------------------
+# Labels: Docker label key names for overrides
+# ---------------------------------------------------------------------------
+labels:
+  enabled: bandwidth.enabled
+  speed: bandwidth.speed
+  daily_quota: bandwidth.daily_quota
+  warning: bandwidth.warning
+  webhook: bandwidth.webhook
+  history: bandwidth.history
+  priority: bandwidth.priority
+  exceeded_speed: bandwidth.exceeded_speed
+
+# ---------------------------------------------------------------------------
+# Traffic Control: Linux tc settings
+# ---------------------------------------------------------------------------
+traffic_control:
+  enabled: true
+  default_qdisc: htb             # Hierarchy Token Bucket
+  handle_root: "1:"
+  default_class: "1:1"
+  verify_on_apply: true          # Verify rules after applying
+  repair_on_fail: true           # Auto-repair broken rules
+  max_retries: 3
+
+# ---------------------------------------------------------------------------
+# Defaults: Fallback values when labels/config don't specify
+# ---------------------------------------------------------------------------
+defaults:
+  speed_mbps: 100
+  daily_quota_gb: 500
+  warning_percent: 90
+  priority: standard
+  webhook: false
+  history: true
+
+# ---------------------------------------------------------------------------
+# Timezone: Timezone for daily quota reset
+# ---------------------------------------------------------------------------
+timezone: Asia/Kolkata
