@@ -37,7 +37,9 @@ banner "╚═══════════════════════
 echo ""
 
 # ─── Configuration ─────────────────────────────────────────────────────────────
-REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$SCRIPT_DIR"
+cd "$REPO_DIR" || { echo "Cannot find source directory"; exit 1; }
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/bandwidth"
 DATA_DIR="/var/lib/bandwidth"
