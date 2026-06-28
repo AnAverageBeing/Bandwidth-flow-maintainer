@@ -37,9 +37,16 @@ banner "╚═══════════════════════
 echo ""
 
 # ─── Configuration ─────────────────────────────────────────────────────────────
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || pwd)"
+# Get the absolute directory of this script, regardless of how it was invoked
+if [ -n "${BASH_SOURCE[0]}" ]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+elif command -v readlink >/dev/null 2>&1; then
+    SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+else
+    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+fi
 REPO_DIR="$SCRIPT_DIR"
-cd "$REPO_DIR" || { echo "Cannot find source directory"; exit 1; }
+cd "$REPO_DIR" || { echo "ERROR: Cannot cd to $REPO_DIR"; exit 1; }
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/bandwidth"
 DATA_DIR="/var/lib/bandwidth"

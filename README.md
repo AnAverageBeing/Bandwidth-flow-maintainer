@@ -68,7 +68,7 @@ Bandwidth Manager provides enterprise-grade bandwidth control for Docker contain
 ### One-Liner Install
 
 ```bash
-git clone https://github.com/AnAverageBeing/Bandwidth-flow-maintainer.git && cd Bandwidth-flow-maintainer && sudo bash install.sh
+git clone https://github.com/AnAverageBeing/Bandwidth-flow-maintainer.git && cd Bandwidth-flow-maintainer && sudo bash "$PWD/install.sh"
 ```
 
 > **Note:** This is a private repository. You will be prompted for your GitHub username and password/token during clone.
