@@ -22,7 +22,11 @@ var (
 	topRed      = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4500"))
 	topCyan     = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FFFF"))
 	topMuted    = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
-	topTitleBar = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#7B68EE")).Padding(0, 1).Width(60)
+	topTitleBar = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#7B68EE")).Padding(0, 1).Width(70)
+	topBtn      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#000000")).Background(lipgloss.Color("#7B68EE")).Padding(0, 1)
+	topBtnMuted = lipgloss.NewStyle().Foreground(lipgloss.Color("#CCCCCC")).Background(lipgloss.Color("#3A3A5A")).Padding(0, 1)
+	topBtnGreen = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#000000")).Background(lipgloss.Color("#00FF00")).Padding(0, 1)
+	topBtnRed   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#FF0000")).Padding(0, 1)
 )
 
 type topTickMsg time.Time
@@ -64,7 +68,7 @@ func NewTopModel() TopModel {
 }
 
 func (m TopModel) Init() tea.Cmd {
-	return tea.Batch(m.topRefreshCmd(), topTickCmd())
+	return tea.Batch(m.topRefreshCmd(), topTickCmd(), tea.EnableMouseCellMotion)
 }
 
 func topTickCmd() tea.Cmd {
@@ -106,6 +110,56 @@ func (m TopModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil
+
+	case tea.MouseMsg:
+		if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
+			return m, nil
+		}
+		// Bottom button bar (height-2)
+		if msg.Y == m.height-2 || msg.Y == m.height-1 {
+			switch {
+			case msg.X < 20:
+				if m.mode == "all" {
+					m.mode = "docker"
+				} else {
+					m.mode = "all"
+				}
+				m.selected = 0
+				return m, m.topRefreshCmd()
+			case msg.X >= 20 && msg.X < 35:
+				switch m.sortBy {
+				case "total":
+					m.sortBy = "rx"
+				case "rx":
+					m.sortBy = "tx"
+				case "tx":
+					m.sortBy = "total"
+				}
+				return m, m.topRefreshCmd()
+			case msg.X >= 35 && msg.X < 44:
+				m.period = "1m"
+				return m, m.topRefreshCmd()
+			case msg.X >= 44 && msg.X < 53:
+				m.period = "5m"
+				return m, m.topRefreshCmd()
+			case msg.X >= 53 && msg.X < 62:
+				m.period = "1h"
+				return m, m.topRefreshCmd()
+			case msg.X >= 62 && msg.X < 71:
+				m.period = "24h"
+				return m, m.topRefreshCmd()
+			case msg.X >= 71:
+				m.quitting = true
+				return m, tea.Quit
+			}
+		}
+		// Click on entry rows (y >= 4)
+		rowY := msg.Y - 4
+		if rowY >= 0 && rowY < len(m.entries) {
+			m.selected = rowY
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
@@ -155,9 +209,11 @@ func (m TopModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.period = "24h"
 			return m, m.topRefreshCmd()
 		}
+
 	case topTickMsg:
 		m.lastRefresh = time.Now()
 		return m, tea.Batch(m.topRefreshCmd(), topTickCmd())
+
 	case topRefreshMsg:
 		m.entries = msg.entries
 		m.totalRX, m.totalTX = msg.totalRX, msg.totalTX
@@ -171,20 +227,30 @@ func (m TopModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m TopModel) View() string {
 	if m.quitting {
-		return "Goodbye!\n"
+		return "\n"
 	}
+
 	var sb strings.Builder
+
+	// Title
 	modeLabel := "🐳 Docker Only"
 	if m.mode == "all" {
 		modeLabel = "🌐 All Apps"
 	}
-	sb.WriteString(topTitleBar.Render(fmt.Sprintf("⚡ Bandwidth Top — %s  [Tab]switch [s]sort [1/5/h/d]period [q]quit", modeLabel)))
+	sb.WriteString(topTitleBar.Render(fmt.Sprintf("⚡ Bandwidth Top — %s", modeLabel)))
 	sb.WriteString("\n\n")
-	bar := topBuildGauge(m.totalRX+m.totalTX, 1000, 40)
-	sb.WriteString(fmt.Sprintf("Total: ↓%.1f Mbps  ↑%.1f Mbps  [%s]\n\n", m.totalRX, m.totalTX, bar))
-	hdr := fmt.Sprintf("  %-4s %-22s %-8s %8s %8s %8s", "#", "NAME", "TYPE", "RX_Mbps", "TX_Mbps", "TOTAL")
-	sb.WriteString(topHeader.Render(hdr) + "\n")
-	maxRows := m.height - 15
+
+	// Total gauge
+	total := m.totalRX + m.totalTX
+	bar := topBuildGauge(total, 1000, 40)
+	sb.WriteString(fmt.Sprintf("  Total: %s ↓  %s ↑  [%s]\n\n", humanMbps(m.totalRX), humanMbps(m.totalTX), bar))
+
+	// Header
+	sb.WriteString(topHeader.Render(fmt.Sprintf("  %-4s %-24s %-8s %10s %10s %10s", "#", "NAME", "TYPE", "RX", "TX", "TOTAL")))
+	sb.WriteString("\n")
+
+	// Entries
+	maxRows := m.height - 14
 	if maxRows < 5 {
 		maxRows = 20
 	}
@@ -199,7 +265,9 @@ func (m TopModel) View() string {
 		if e.TotalMbps > 500 {
 			c = topRed
 		}
-		row := fmt.Sprintf("  %-4d %-22s %-8s %8.1f %8.1f %8.1f", i+1, topTrunc(e.Name, 22), e.Type, e.RXMbps, e.TXMbps, e.TotalMbps)
+		row := fmt.Sprintf("  %-4d %-24s %-8s %10s %10s %10s",
+			i+1, topTrunc(e.Name, 24), e.Type,
+			humanMbps(e.RXMbps), humanMbps(e.TXMbps), humanMbps(e.TotalMbps))
 		if i == m.selected {
 			row = topSelected.Render(row)
 		} else {
@@ -207,16 +275,77 @@ func (m TopModel) View() string {
 		}
 		sb.WriteString(row + "\n")
 	}
+
 	sb.WriteString("\n")
-	stats := fmt.Sprintf("Stats [%s] │ Avg: ↓%.1f ↑%.1f │ 95th: ↓%.1f ↑%.1f │ Peak: ↓%.1f ↑%.1f │ Entries: %d", m.period, m.avgRX, m.avgTX, m.p95RX, m.p95TX, m.peakRX, m.peakTX, len(m.entries))
-	sb.WriteString(topBorder.Render(stats) + "\n\n")
-	if m.help {
-		sb.WriteString(topMuted.Render("↑↓:Nav Tab:All/Docker s:Sort 1/5/h/d:Period ?:Help q:Quit"))
-	} else {
-		sb.WriteString(topMuted.Render("?:Help"))
+
+	// Stats panel
+	stats := fmt.Sprintf("Stats [%s] │ Avg: %s↓ %s↑ │ 95th: %s↓ %s↑ │ Peak: %s↓ %s↑ │ %d entries",
+		m.period,
+		humanMbps(m.avgRX), humanMbps(m.avgTX),
+		humanMbps(m.p95RX), humanMbps(m.p95TX),
+		humanMbps(m.peakRX), humanMbps(m.peakTX),
+		len(m.entries))
+	sb.WriteString(topBorder.Render(stats))
+	sb.WriteString("\n\n")
+
+	// Button bar
+	modeBtn := topBtn.Render(" [Tab] All/Docker ")
+	sortBtn := topBtnMuted.Render(" [s] Sort ")
+	p1Btn := topBtnMuted.Render(" [1] 1m ")
+	p5Btn := topBtnMuted.Render(" [5] 5m ")
+	phBtn := topBtnMuted.Render(" [h] 1h ")
+	pdBtn := topBtnMuted.Render(" [d] 24h ")
+	quitBtn := topBtnRed.Render(" [q] Quit ")
+
+	// Highlight current period
+	switch m.period {
+	case "1m":
+		p1Btn = topBtn.Render(" [1] 1m ")
+	case "5m":
+		p5Btn = topBtn.Render(" [5] 5m ")
+	case "1h":
+		phBtn = topBtn.Render(" [h] 1h ")
+	case "24h":
+		pdBtn = topBtn.Render(" [d] 24h ")
 	}
+
+	sb.WriteString(modeBtn + sortBtn + p1Btn + p5Btn + phBtn + pdBtn + quitBtn)
+	if m.help {
+		sb.WriteString("\n" + topMuted.Render("  Click buttons or use keys: ↑↓ Navigate  Tab Toggle  s Sort  1/5/h/d Period  q Quit"))
+	}
+
 	return sb.String()
 }
+
+// ─── Human Readable ───────────────────────────────────────────────────────────
+
+func humanMbps(mbps float64) string {
+	if mbps >= 1000 {
+		return fmt.Sprintf("%.2fG", mbps/1000)
+	}
+	if mbps >= 1 {
+		return fmt.Sprintf("%.1fM", mbps)
+	}
+	if mbps >= 0.001 {
+		return fmt.Sprintf("%.0fK", mbps*1000)
+	}
+	return "0"
+}
+
+func humanBytes(b float64) string {
+	if b >= 1e9 {
+		return fmt.Sprintf("%.2fGB", b/1e9)
+	}
+	if b >= 1e6 {
+		return fmt.Sprintf("%.1fMB", b/1e6)
+	}
+	if b >= 1e3 {
+		return fmt.Sprintf("%.0fKB", b/1e3)
+	}
+	return fmt.Sprintf("%.0fB", b)
+}
+
+// ─── Data Collection ──────────────────────────────────────────────────────────
 
 func topCollect(mode string) []topEntry {
 	var entries []topEntry
