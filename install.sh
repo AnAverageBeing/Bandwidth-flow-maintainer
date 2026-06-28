@@ -85,14 +85,14 @@ else
 fi
 
 if $NEED_GO; then
-    log "Installing Go 1.23..."
-    GO_URL="https://go.dev/dl/go1.23.6.linux-amd64.tar.gz"
+    log "Installing Go 1.25..."
+        GO_URL="https://go.dev/dl/go1.25.4.linux-amd64.tar.gz"
     curl -sSL "$GO_URL" -o /tmp/go.tar.gz
     tar -C /usr/local -xzf /tmp/go.tar.gz
     export PATH=$PATH:/usr/local/go/bin
     echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile 2>/dev/null || true
     rm -f /tmp/go.tar.gz
-    ok "Go 1.23: installed"
+    ok "Go 1.25: installed"
 fi
 
 # Ensure Go is in PATH for this session
@@ -127,10 +127,8 @@ ok "Module resolution: handled by go build"
 # ─── Step 4: Compile Binaries ──────────────────────────────────────────────────
 header "Step 4/7: Compiling Binaries"
 
-# Force go.mod to stay at go 1.21 (some deps try to upgrade it)
-sed -i 's/^go 1\.[0-9]\+/go 1.21/' "$REPO_DIR/go.mod" 2>/dev/null || true
-export GOTOOLCHAIN=auto
-export GOFLAGS="-mod=mod"
+# Build with Go's built-in module resolution
+export GOTOOLCHAIN=local
 
 log "Building bandwidth (CLI)..."
 if CGO_ENABLED=0 go build -o "$REPO_DIR/build/bandwidth" -ldflags="-s -w" ./cmd/bandwidth/ 2>/tmp/build-cli.log; then
