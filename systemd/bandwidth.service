@@ -1,8 +1,7 @@
 [Unit]
 Description=Bandwidth Manager Daemon
 Documentation=https://github.com/AnAverageBeing/Bandwidth-flow-maintainer
-After=network.target docker.service
-Requires=docker.service
+After=network.target
 Wants=network.target
 
 [Service]
