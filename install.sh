@@ -124,7 +124,7 @@ fi
 header "Step 4/7: Compiling Binaries"
 
 log "Building bandwidth (CLI)..."
-if CGO_ENABLED=1 go build -o "$REPO_DIR/build/bandwidth" -ldflags="-s -w" ./cmd/bandwidth/ 2>/tmp/build-cli.log; then
+if CGO_ENABLED=0 go build -o "$REPO_DIR/build/bandwidth" -ldflags="-s -w" ./cmd/bandwidth/ 2>/tmp/build-cli.log; then
     ok "bandwidth CLI: compiled"
 else
     fail "bandwidth CLI: FAILED"
@@ -132,7 +132,7 @@ else
 fi
 
 log "Building bandwidthd (daemon)..."
-if CGO_ENABLED=1 go build -o "$REPO_DIR/build/bandwidthd" -ldflags="-s -w" ./cmd/bandwidthd/ 2>/tmp/build-daemon.log; then
+if CGO_ENABLED=0 go build -o "$REPO_DIR/build/bandwidthd" -ldflags="-s -w" ./cmd/bandwidthd/ 2>/tmp/build-daemon.log; then
     ok "bandwidthd daemon: compiled"
 else
     fail "bandwidthd daemon: FAILED"
