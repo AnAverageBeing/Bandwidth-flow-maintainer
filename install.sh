@@ -86,17 +86,24 @@ fi
 
 if $NEED_GO; then
     log "Installing Go 1.25..."
-        GO_URL="https://go.dev/dl/go1.25.4.linux-amd64.tar.gz"
+    # Remove any old Go installation
+    rm -rf /usr/local/go /usr/local/go/bin/go 2>/dev/null || true
+    GO_URL="https://go.dev/dl/go1.25.4.linux-amd64.tar.gz"
     curl -sSL "$GO_URL" -o /tmp/go.tar.gz
     tar -C /usr/local -xzf /tmp/go.tar.gz
-    export PATH=$PATH:/usr/local/go/bin
-    echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile 2>/dev/null || true
+    export PATH=/usr/local/go/bin:$PATH
+    # Remove old Go from profile and add new
+    sed -i '/\/go\/bin/d' /etc/profile 2>/dev/null || true
+    sed -i '/\/go\/bin/d' /root/.bashrc 2>/dev/null || true
+    echo 'export PATH=/usr/local/go/bin:$PATH' >> /etc/profile
     rm -f /tmp/go.tar.gz
+    # Also clear Go module cache to avoid corruption
+    go clean -modcache 2>/dev/null || true
     ok "Go 1.25: installed"
 fi
 
-# Ensure Go is in PATH for this session
-export PATH=$PATH:/usr/local/go/bin:~/go/bin
+# Ensure Go is in PATH for this session (prepend to override old versions)
+export PATH=/usr/local/go/bin:$PATH:/root/go/bin
 export PATH=$PATH:/usr/local/go/bin:~/go/bin
 
 # Check Docker (needs sudo or docker group)
