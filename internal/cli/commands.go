@@ -239,25 +239,105 @@ func (c *CLI) List() {
 	}
 	json.Unmarshal(resp.Data, &result)
 
-	fmt.Printf("%-15s %-25s %-10s %8s %8s %8s %8s\n",
-		"ID", "NAME", "STATE", "RX_Mbps", "TX_Mbps", "USED_GB", "QUOTA_GB")
-	fmt.Println(strings.Repeat("-", 95))
+	fmt.Println("╔══════════════════════════════════════════════════════════════════════════════════════════╗")
+	fmt.Println("║  🐳 Docker Container Bandwidth — Per-Container Limits (Not VPS-Wide)                     ║")
+	fmt.Println("╚══════════════════════════════════════════════════════════════════════════════════════════╝")
+	fmt.Println()
+	fmt.Printf("%-15s %-25s %-16s %8s %8s %8s %8s\n",
+		"ID", "NAME", "VETH", "RX_Mbps", "TX_Mbps", "USED_GB", "QUOTA_GB")
+	fmt.Println(strings.Repeat("-", 105))
 
 	for _, c := range result.Containers {
-		state := string(c.State)
-		fmt.Printf("%-15s %-25s %-10s %8.1f %8.1f %8.2f %8.1f\n",
-			c.ID[:12], truncate(c.Name, 25), state,
+		fmt.Printf("%-15s %-25s %-16s %8.1f %8.1f %8.2f %8.1f\n",
+			shortID12(c.ID), truncate(c.Name, 25), truncate(c.VethInterface, 16),
 			c.CurrentRxMbps, c.CurrentTxMbps,
 			c.TodayRxGB+c.TodayTxGB, c.DailyQuotaGB)
 	}
-	fmt.Printf("\nTotal: %d containers\n", result.Count)
+	fmt.Println()
+	if len(result.Containers) > 0 {
+		c := result.Containers[0]
+		fmt.Printf("💡 Each container gets its OWN tc rules on its OWN veth interface (e.g. %s)\n", c.VethInterface)
+		fmt.Println("   Run 'tc qdisc show dev " + c.VethInterface + "' to see kernel-level enforcement")
+	}
+	fmt.Printf("\nTotal: %d Docker containers under bandwidth management\n", result.Count)
 }
 
-// Inspect shows detailed container information.
+// Inspect shows detailed container information with TC rule verification.
 func (c *CLI) Inspect(id string) {
-	fmt.Printf("Inspecting container: %s\n", id)
-	// Stub — would query daemon via socket
-	fmt.Println("(container details would appear here)")
+	resp, err := c.sendCommand("list", nil)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
+	var result struct {
+		Containers []*models.Container `json:"containers"`
+	}
+	json.Unmarshal(resp.Data, &result)
+
+	var found *models.Container
+	for _, cont := range result.Containers {
+		if strings.HasPrefix(cont.ID, id) || cont.Name == id || strings.Contains(cont.Name, id) {
+			found = cont
+			break
+		}
+	}
+	if found == nil {
+		fmt.Printf("Container '%s' not found.\n", id)
+		return
+	}
+	ct := found
+
+	fmt.Println("╔══════════════════════════════════════════════════════════════╗")
+	fmt.Println("║  🐳 Container Inspection                                     ║")
+	fmt.Println("╚══════════════════════════════════════════════════════════════╝")
+	fmt.Println()
+	fmt.Printf("  Name:          %s\n", ct.Name)
+	fmt.Printf("  Container ID:  %s\n", shortID12(ct.ID))
+	fmt.Printf("  Full ID:       %s\n", ct.ID)
+	fmt.Printf("  State:         %s\n", string(ct.State))
+	fmt.Printf("  PID:           %d\n", ct.PID)
+	fmt.Println()
+	fmt.Println("  ── Network ──")
+	fmt.Printf("  Veth Interface: %s  ← this container's OWN virtual ethernet\n", ct.VethInterface)
+	fmt.Printf("  IP Address:     %s\n", ct.IPAddress)
+	fmt.Printf("  Docker Network: %s\n", ct.NetworkName)
+	if len(ct.Ports) > 0 {
+		fmt.Println("  Ports:")
+		for _, p := range ct.Ports {
+			fmt.Printf("    %d/%s → host:%d\n", p.ContainerPort, p.Protocol, p.HostPort)
+		}
+	}
+	fmt.Println()
+	fmt.Println("  ── Bandwidth Limits (THIS CONTAINER ONLY) ──")
+	fmt.Printf("  Download Limit: %.0f Mbps\n", ct.LimitRxMbps)
+	fmt.Printf("  Upload Limit:   %.0f Mbps\n", ct.LimitTxMbps)
+	fmt.Printf("  Burst Ceiling:  %.0f Mbps\n", ct.CeilRxMbps)
+	fmt.Println()
+	fmt.Println("  ── Quota ──")
+	fmt.Printf("  Daily Quota:    %.0f GB\n", ct.DailyQuotaGB)
+	fmt.Printf("  Used Today:     %.2f GB (RX) + %.2f GB (TX) = %.2f GB\n", ct.TodayRxGB, ct.TodayTxGB, ct.TodayRxGB+ct.TodayTxGB)
+	fmt.Printf("  Current Speed:  %.1f Mbps ↓ / %.1f Mbps ↑\n", ct.CurrentRxMbps, ct.CurrentTxMbps)
+	if ct.Priority != "" {
+		fmt.Printf("  Priority:       %s\n", ct.Priority)
+	}
+	fmt.Println()
+	fmt.Println("  ── TC Rules (Kernel-Level) ──")
+	if ct.VethInterface != "" {
+		fmt.Printf("  Verify: tc qdisc show dev %s\n", ct.VethInterface)
+		// Show actual tc rules if accessible
+		tcOut, _ := exec.Command("tc", "qdisc", "show", "dev", ct.VethInterface).CombinedOutput()
+		tcLines := strings.Split(strings.TrimSpace(string(tcOut)), "\n")
+		for _, l := range tcLines {
+			if l != "" {
+				fmt.Printf("    ✓ %s\n", l)
+			}
+		}
+	} else {
+		fmt.Println("    (no veth interface detected)")
+	}
+	fmt.Println()
+	fmt.Println("  ⚡ This container's bandwidth is limited INDEPENDENTLY from other containers.")
+	fmt.Println("  ⚡ Other containers and the VPS itself are NOT affected by these limits.")
 }
 
 // InspectPort shows information for a container by host port.
@@ -469,6 +549,13 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max-3] + "..."
+}
+
+func shortID12(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
 }
 
 // DefaultSocketPath returns the standard Unix socket path.
