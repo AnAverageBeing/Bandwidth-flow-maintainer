@@ -107,11 +107,13 @@ func (c *CLI) Configure() {
 		{"default_quota_gb", "Default daily quota (GB, 0=unlimited)", "500"},
 		{"exceeded_speed_rx_mbps", "Throttle download when quota exceeded (Mbps)", "1"},
 		{"exceeded_speed_tx_mbps", "Throttle upload when quota exceeded (Mbps)", "1"},
-		{"warning_percent", "Warning threshold (%% of quota)", "90"},
+		{"warning_percent", "Warning threshold (% of quota)", "90"},
 		{"poll_interval", "Poll interval (e.g. 5s, 10s)", "5s"},
 		{"discovery_interval", "Discovery scan interval", "10s"},
 		{"timezone", "Timezone for midnight reset", "Asia/Kolkata"},
 		{"log_level", "Log level (debug/info/warn/error)", "info"},
+		{"cleanup_stale_hours", "Remove containers unseen for N hours", "72"},
+		{"history_retention_days", "Keep usage history for N days", "365"},
 	}
 
 	for _, p := range prompts {
@@ -125,6 +127,71 @@ func (c *CLI) Configure() {
 		if input != "" {
 			cfgStr = replaceYAMLValue(cfgStr, p.key, input)
 		}
+	}
+
+	// ── Alert Configuration ──
+	fmt.Println()
+	fmt.Println("  ── Alerts & Notifications ──")
+	fmt.Println("  Where should alerts be sent?")
+	fmt.Println("    1) None (default)")
+	fmt.Println("    2) Console log only")
+	fmt.Println("    3) Discord webhook")
+	fmt.Println("    4) Both (console + Discord)")
+	fmt.Print("  Choose [1]: ")
+	alertChoice, _ := reader.ReadString('\n')
+	alertChoice = strings.TrimSpace(alertChoice)
+	if alertChoice == "" {
+		alertChoice = "1"
+	}
+
+	switch alertChoice {
+	case "1":
+		cfgStr = replaceYAMLValue(cfgStr, "enabled", "false")
+		fmt.Println("  ✓ Alerts: disabled")
+	case "2":
+		cfgStr = replaceYAMLValue(cfgStr, "enabled", "false")
+		// Console logging is always on via logging.console
+		fmt.Println("  ✓ Alerts: console log (already enabled)")
+	case "3", "4":
+		cfgStr = replaceYAMLValue(cfgStr, "enabled", "true")
+		fmt.Print("  Discord webhook URL: ")
+		whURL, _ := reader.ReadString('\n')
+		whURL = strings.TrimSpace(whURL)
+		if whURL != "" {
+			cfgStr = replaceYAMLValue(cfgStr, "url", whURL)
+			cfgStr = replaceYAMLValue(cfgStr, "enabled", "true")
+			fmt.Println("  ✓ Discord webhook configured")
+		}
+		if alertChoice == "3" {
+			fmt.Println("  ✓ Alerts: Discord only")
+		} else {
+			fmt.Println("  ✓ Alerts: Console + Discord")
+		}
+	}
+
+	// ── API ──
+	fmt.Println()
+	fmt.Print("  Enable REST API? [y/N]: ")
+	apiChoice, _ := reader.ReadString('\n')
+	apiChoice = strings.TrimSpace(strings.ToLower(apiChoice))
+	if apiChoice == "y" || apiChoice == "yes" {
+		cfgStr = replaceYAMLValue(cfgStr, "enabled", "true")
+		fmt.Println("  ✓ API enabled (token auto-generated on start)")
+	} else {
+		cfgStr = replaceYAMLValue(cfgStr, "enabled", "false")
+		fmt.Println("  ✓ API disabled")
+	}
+
+	// ── Metrics ──
+	fmt.Print("  Enable Prometheus metrics? [y/N]: ")
+	metChoice, _ := reader.ReadString('\n')
+	metChoice = strings.TrimSpace(strings.ToLower(metChoice))
+	if metChoice == "y" || metChoice == "yes" {
+		cfgStr = replaceYAMLValue(cfgStr, "enabled", "true")
+		fmt.Println("  ✓ Metrics enabled on :9090/metrics")
+	} else {
+		cfgStr = replaceYAMLValue(cfgStr, "enabled", "false")
+		fmt.Println("  ✓ Metrics disabled")
 	}
 
 	fmt.Println()
@@ -172,13 +239,14 @@ func replaceYAMLValue(yamlStr, key, newVal string) string {
 	lines := strings.Split(yamlStr, "\n")
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, key+":") {
+		// Only match top-level keys (not indented sub-keys)
+		if strings.HasPrefix(trimmed, key+":") && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
 			prefix := line[:strings.Index(line, key)]
 			lines[i] = prefix + key + ": " + newVal
-			break
+			return strings.Join(lines, "\n")
 		}
 	}
-	return strings.Join(lines, "\n")
+	return yamlStr
 }
 
 // Status fetches and displays daemon status.
