@@ -65,15 +65,17 @@ Bandwidth Manager provides enterprise-grade bandwidth control for Docker contain
 
 ## Quick Start
 
-### One-Liner Install (Recommended)
+### One-Liner Install
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/AnAverageBeing/Bandwidth-flow-maintainer/main/install.sh | sudo bash
+git clone https://github.com/AnAverageBeing/Bandwidth-flow-maintainer.git && cd Bandwidth-flow-maintainer && sudo bash install.sh
 ```
 
+> **Note:** This is a private repository. You will be prompted for your GitHub username and password/token during clone.
+
 This single command:
-1. Installs all dependencies (Go, git, curl)
-2. Clones the repository
+1. Clones the repository
+2. Installs all dependencies (Go, git, curl)
 3. Compiles both binaries
 4. Installs to `/usr/local/bin/`
 5. Creates config, database, and log directories

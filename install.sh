@@ -37,13 +37,12 @@ banner "╚═══════════════════════
 echo ""
 
 # ─── Configuration ─────────────────────────────────────────────────────────────
-REPO="https://github.com/AnAverageBeing/Bandwidth-flow-maintainer.git"
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/bandwidth"
 DATA_DIR="/var/lib/bandwidth"
 LOG_DIR="/var/log/bandwidth"
-BUILD_DIR="/tmp/bandwidth-build"
-GO_MIN_VERSION="1.21"
+BUILD_DIR="$REPO_DIR"
 
 # ─── Step 1: Install Dependencies ──────────────────────────────────────────────
 header "Step 1/7: Installing Dependencies"
@@ -106,14 +105,11 @@ else
     warn "tc not found — install iproute2 package"
 fi
 
-# ─── Step 2: Clone Repository ──────────────────────────────────────────────────
-header "Step 2/7: Downloading Source"
+# ─── Step 2: Build Directory ──────────────────────────────────────────────────
+header "Step 2/7: Preparing Build"
 
-rm -rf "$BUILD_DIR"
-git clone --depth 1 "$REPO" "$BUILD_DIR" 2>/dev/null
-ok "Repository cloned"
-
-cd "$BUILD_DIR"
+ok "Source directory: $REPO_DIR"
+cd "$REPO_DIR"
 
 # ─── Step 3: Install Go Dependencies ────────────────────────────────────────────
 header "Step 3/7: Resolving Go Modules"
@@ -128,7 +124,7 @@ fi
 header "Step 4/7: Compiling Binaries"
 
 log "Building bandwidth (CLI)..."
-if go build -o "$BUILD_DIR/build/bandwidth" -ldflags="-s -w" ./cmd/bandwidth/ 2>/tmp/build-cli.log; then
+if go build -o "$REPO_DIR/build/bandwidth" -ldflags="-s -w" ./cmd/bandwidth/ 2>/tmp/build-cli.log; then
     ok "bandwidth CLI: compiled"
 else
     fail "bandwidth CLI: FAILED"
@@ -136,7 +132,7 @@ else
 fi
 
 log "Building bandwidthd (daemon)..."
-if go build -o "$BUILD_DIR/build/bandwidthd" -ldflags="-s -w" ./cmd/bandwidthd/ 2>/tmp/build-daemon.log; then
+if go build -o "$REPO_DIR/build/bandwidthd" -ldflags="-s -w" ./cmd/bandwidthd/ 2>/tmp/build-daemon.log; then
     ok "bandwidthd daemon: compiled"
 else
     fail "bandwidthd daemon: FAILED"
@@ -157,8 +153,8 @@ mkdir -p /root/.docker && echo '{}' > /root/.docker/config.json
 ok "Directories: created"
 
 # Binaries
-cp -f "$BUILD_DIR/build/bandwidth" "$INSTALL_DIR/bandwidth"
-cp -f "$BUILD_DIR/build/bandwidthd" "$INSTALL_DIR/bandwidthd"
+cp -f "$REPO_DIR/build/bandwidth" "$INSTALL_DIR/bandwidth"
+cp -f "$REPO_DIR/build/bandwidthd" "$INSTALL_DIR/bandwidthd"
 chmod 755 "$INSTALL_DIR/bandwidth" "$INSTALL_DIR/bandwidthd"
 ok "Binaries: installed to $INSTALL_DIR"
 
@@ -166,12 +162,12 @@ ok "Binaries: installed to $INSTALL_DIR"
 if [ -f "$CONFIG_DIR/config.yaml" ]; then
     warn "Config exists — preserving existing $CONFIG_DIR/config.yaml"
 else
-    cp "$BUILD_DIR/configs/config.yaml" "$CONFIG_DIR/config.yaml"
+    cp "$REPO_DIR/configs/config.yaml" "$CONFIG_DIR/config.yaml"
     ok "Config: installed to $CONFIG_DIR"
 fi
 
 # Systemd service
-cp "$BUILD_DIR/systemd/bandwidth.service" /etc/systemd/system/bandwidth.service
+cp "$REPO_DIR/systemd/bandwidth.service" /etc/systemd/system/bandwidth.service
 # Fix ReadWritePaths for token persistence
 sed -i 's|ReadWritePaths=/var/run /var/log/bandwidth /var/lib/bandwidth /sys/class/net /root/.docker|ReadWritePaths=/var/run /var/log/bandwidth /var/lib/bandwidth /sys/class/net /root/.docker /etc/bandwidth|' /etc/systemd/system/bandwidth.service
 systemctl daemon-reload
@@ -271,7 +267,7 @@ else
 fi
 
 # Test 10: Go build self-test
-if go build -o /tmp/bw-self-test "$BUILD_DIR/cmd/bandwidth/" 2>/dev/null; then
+if go build -o /tmp/bw-self-test "$REPO_DIR/cmd/bandwidth/" 2>/dev/null; then
     ok "Build system: Go toolchain works"
     rm -f /tmp/bw-self-test
 else
@@ -316,6 +312,6 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 # Cleanup
-rm -rf "$BUILD_DIR/build" 2>/dev/null || true
+rm -rf "$REPO_DIR/build" 2>/dev/null || true
 
 exit $FAIL
