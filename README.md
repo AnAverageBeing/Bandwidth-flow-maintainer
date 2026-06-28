@@ -65,30 +65,29 @@ Bandwidth Manager provides enterprise-grade bandwidth control for Docker contain
 
 ## Quick Start
 
-### Prerequisites
-
-- Linux kernel 4.15+
-- Docker Engine 20.10+
-- Go 1.21+ (for building from source)
-- Root access (for `tc` and Docker socket)
-
-### Installation
+### One-Liner Install (Recommended)
 
 ```bash
-# Clone the repository
-git clone https://github.com/AnAverageBeing/Bandwidth-flow-maintainer.git
-cd Bandwidth-flow-maintainer
-
-# Run the installer (requires root)
-sudo bash scripts/install.sh
+curl -sSL https://raw.githubusercontent.com/AnAverageBeing/Bandwidth-flow-maintainer/main/install.sh | sudo bash
 ```
 
-The installer will:
-1. Compile `bandwidth` and `bandwidthd` binaries
-2. Install to `/usr/local/bin/`
-3. Create `/etc/bandwidth/config.yaml`
-4. Create `/var/lib/bandwidth/` and `/var/log/bandwidth/`
-5. Install and start the systemd service
+This single command:
+1. Installs all dependencies (Go, git, curl)
+2. Clones the repository
+3. Compiles both binaries
+4. Installs to `/usr/local/bin/`
+5. Creates config, database, and log directories
+6. Installs and starts the systemd service
+7. **Runs a 10-point test suite** showing pass/fail for each check
+8. Displays final summary with quick-start commands
+
+### Manual Install
+
+```bash
+git clone https://github.com/AnAverageBeing/Bandwidth-flow-maintainer.git
+cd Bandwidth-flow-maintainer
+sudo bash scripts/install.sh
+```
 
 ### Verify Installation
 
