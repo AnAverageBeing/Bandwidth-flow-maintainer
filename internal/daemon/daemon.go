@@ -198,12 +198,43 @@ func (d *Daemon) Start(ctx context.Context) error {
 	// Send startup webhook
 	d.whMgr.Send(models.EventDaemonStarted, "", "Bandwidth manager daemon started", "info")
 
-	// Initial discovery
-	containers, err := d.discovery.Discover(ctx)
+	// Initial discovery (with timeout)
+	d.log.Info("daemon: starting initial discovery...")
+	discoveryCtx, discoveryCancel := context.WithTimeout(ctx, 15*time.Second)
+	containers, err := d.discovery.Discover(discoveryCtx)
+	discoveryCancel()
 	if err != nil {
 		d.log.Error("daemon: initial discovery: %v", err)
 	}
 	d.log.Info("daemon: discovered %d containers", len(containers))
+
+	// Apply config defaults to containers that don't have limits set
+	for _, c := range containers {
+		if c.LimitRxMbps <= 0 {
+			c.LimitRxMbps = d.cfg.Bandwidth.DefaultRxMbps
+		}
+		if c.LimitTxMbps <= 0 {
+			c.LimitTxMbps = d.cfg.Bandwidth.DefaultTxMbps
+		}
+		if c.CeilRxMbps <= 0 {
+			c.CeilRxMbps = d.cfg.Bandwidth.DefaultCeilMbps
+		}
+		if c.CeilTxMbps <= 0 {
+			c.CeilTxMbps = d.cfg.Bandwidth.DefaultCeilMbps
+		}
+		if c.DailyQuotaGB <= 0 {
+			c.DailyQuotaGB = d.cfg.Quota.DefaultQuotaGB
+		}
+		if c.WarningPercent <= 0 {
+			c.WarningPercent = d.cfg.Quota.WarningPercent
+		}
+		if c.ExceededSpeedRx <= 0 {
+			c.ExceededSpeedRx = d.cfg.Quota.ExceededSpeedRx
+		}
+		if c.ExceededSpeedTx <= 0 {
+			c.ExceededSpeedTx = d.cfg.Quota.ExceededSpeedTx
+		}
+	}
 
 	// Persist containers to DB
 	for _, c := range containers {
@@ -402,8 +433,8 @@ func (d *Daemon) startSocketListener() error {
 	}
 	d.socketLn = ln
 
-	// Set permissions so CLI can connect
-	os.Chmod(socketPath, 0660)
+	// Set permissions so CLI can connect (world-readable/writable for all users)
+	os.Chmod(socketPath, 0666)
 
 	go func() {
 		d.log.Info("daemon: listening on %s", socketPath)

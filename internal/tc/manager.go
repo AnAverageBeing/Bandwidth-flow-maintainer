@@ -202,6 +202,10 @@ func (m *Manager) applyRule(rule *Rule) error {
 	rxKbit := uint64(rule.RxMbps * 1000)
 	txKbit := uint64(rule.TxMbps * 1000)
 	ceilKbit := uint64(rule.CeilMbps * 1000)
+	burstKbit := uint64(rule.BurstMbps * 1000)
+	if burstKbit < 16 {
+		burstKbit = 16 // minimum burst for tc
+	}
 
 	// Remove existing qdisc
 	_ = exec.Command("tc", "qdisc", "del", "dev", iface, "root").Run()
@@ -212,7 +216,7 @@ func (m *Manager) applyRule(rule *Rule) error {
 		{"tc", "class", "add", "dev", iface, "parent", "1:", "classid", "1:1", "htb",
 			"rate", fmt.Sprintf("%dkbit", rxKbit),
 			"ceil", fmt.Sprintf("%dkbit", ceilKbit),
-			"burst", fmt.Sprintf("%dkbit", rule.BurstMbps*1000/8)},
+			"burst", fmt.Sprintf("%dkbit", burstKbit)},
 	}
 
 	// For egress shaping, we add a filter that directs all traffic to class 1:1
@@ -236,7 +240,7 @@ func (m *Manager) applyRule(rule *Rule) error {
 		policeCmd := exec.Command("tc", "filter", "add", "dev", iface, "parent", "ffff:", "protocol", "ip",
 			"prio", "50", "basic", "police",
 			"rate", fmt.Sprintf("%dkbit", rxKbit),
-			"burst", fmt.Sprintf("%dkbit", rule.BurstMbps*1000/8),
+			"burst", fmt.Sprintf("%dkbit", burstKbit),
 			"drop", "flowid", ":1")
 		if out, err := policeCmd.CombinedOutput(); err != nil {
 			m.log.Warn("tc: ingress police failed on %s: %s", iface, strings.TrimSpace(string(out)))

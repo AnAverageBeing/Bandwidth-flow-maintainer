@@ -1,21 +1,18 @@
 // Package docker provides Docker container discovery and event watching.
-// It interfaces with the Docker Engine API to detect containers, their veth interfaces,
-// labels, and lifecycle changes — all without manual registration.
+// It interfaces with the Docker Engine via the docker CLI for maximum compatibility,
+// avoiding Go SDK version mismatches with newer Docker Engine releases.
 package docker
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/events"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/client"
 
 	"github.com/AnAverageBeing/Bandwidth-flow-maintainer/internal/logger"
 	"github.com/AnAverageBeing/Bandwidth-flow-maintainer/pkg/models"
@@ -23,7 +20,6 @@ import (
 
 // Discovery handles automatic Docker container detection and lifecycle tracking.
 type Discovery struct {
-	cli      *client.Client
 	log      *logger.Logger
 	interval time.Duration
 	watch    bool
@@ -52,27 +48,20 @@ type Config struct {
 
 // NewDiscovery creates a new Docker discovery service.
 func NewDiscovery(cfg Config, log *logger.Logger) (*Discovery, error) {
-	opts := []client.Opt{
-		client.WithHost(cfg.Endpoint),
-	}
-	if cfg.APIVersion != "" {
-		opts = append(opts, client.WithVersion(cfg.APIVersion))
+	// Verify docker CLI is accessible
+	if _, err := exec.LookPath("docker"); err != nil {
+		return nil, fmt.Errorf("docker: docker CLI not found in PATH")
 	}
 
-	cli, err := client.NewClientWithOpts(opts...)
-	if err != nil {
-		return nil, fmt.Errorf("docker: create client: %w", err)
-	}
-
-	// Verify connection
+	// Quick connectivity check
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if _, err := cli.Ping(ctx); err != nil {
-		return nil, fmt.Errorf("docker: ping: %w", err)
+	cmd := exec.CommandContext(ctx, "docker", "info")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("docker: docker info failed: %v (output: %s)", err, strings.TrimSpace(string(out)))
 	}
 
 	return &Discovery{
-		cli:        cli,
 		log:        log,
 		interval:   cfg.Interval,
 		watch:      cfg.WatchEvents,
@@ -90,44 +79,63 @@ func (d *Discovery) OnEvent(cb func(event DiscoveryEvent)) {
 
 // Discover performs a full scan of running Docker containers.
 func (d *Discovery) Discover(ctx context.Context) ([]*models.Container, error) {
-	containers, err := d.cli.ContainerList(ctx, container.ListOptions{All: false})
+	// Get all container IDs using docker ps (full IDs with --no-trunc)
+	cmd := exec.CommandContext(ctx, "docker", "ps", "-q", "--no-trunc")
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("docker: list containers: %w", err)
+		return nil, fmt.Errorf("docker: ps: %w", err)
 	}
 
+	ids := strings.Fields(string(out))
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	// First, inspect all containers WITHOUT holding the mutex
+	// (inspectContainer needs d.mu.RLock which would deadlock if we hold Lock)
+	type result struct {
+		id   string
+		cont *models.Container
+		err  error
+	}
+	var results []result
+	for _, id := range ids {
+		cont, err := d.inspectContainer(ctx, id)
+		results = append(results, result{id: id, cont: cont, err: err})
+	}
+
+	// Now update the map under lock
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	var discovered []*models.Container
 	seen := make(map[string]bool)
 
-	for _, c := range containers {
-		inspect, err := d.cli.ContainerInspect(ctx, c.ID)
-		if err != nil {
-			d.log.Warn("docker: inspect %s: %v", c.ID[:12], err)
+	for _, r := range results {
+		if r.err != nil {
+			d.log.Warn("docker: inspect %s: %v", shortID(r.id), r.err)
 			continue
 		}
 
-		cont := d.inspectToContainer(&inspect)
-		seen[c.ID] = true
+		seen[r.id] = true
 
 		// Check if new
-		if _, exists := d.containers[c.ID]; !exists {
-			d.log.Info("docker: found container %s (%s)", cont.Name, c.ID[:12])
+		if _, exists := d.containers[r.id]; !exists {
+			d.log.Info("docker: found container %s (%s)", r.cont.Name, shortID(r.id))
 			if d.callback != nil {
-				d.callback(DiscoveryEvent{Type: "found", Container: cont})
+				d.callback(DiscoveryEvent{Type: "found", Container: r.cont})
 			}
 		}
 
-		d.containers[c.ID] = cont
-		discovered = append(discovered, cont)
+		d.containers[r.id] = r.cont
+		discovered = append(discovered, r.cont)
 	}
 
 	// Detect removed containers
 	for id := range d.containers {
 		if !seen[id] {
 			if existing, ok := d.containers[id]; ok {
-				d.log.Info("docker: container removed %s (%s)", existing.Name, id[:12])
+				d.log.Info("docker: container removed %s (%s)", existing.Name, shortID(id))
 				if d.callback != nil {
 					d.callback(DiscoveryEvent{Type: "removed", Container: existing})
 				}
@@ -140,83 +148,90 @@ func (d *Discovery) Discover(ctx context.Context) ([]*models.Container, error) {
 }
 
 // WatchEvents starts listening for Docker container lifecycle events.
+// Uses docker events command piped through.
 func (d *Discovery) WatchEvents(ctx context.Context) error {
 	if !d.watch {
 		return nil
 	}
 
-	f := filters.NewArgs(
-		filters.Arg("type", "container"),
-		filters.Arg("event", "start"),
-		filters.Arg("event", "die"),
-		filters.Arg("event", "destroy"),
-		filters.Arg("event", "pause"),
-		filters.Arg("event", "unpause"),
-	)
-
-	msgCh, errCh := d.cli.Events(ctx, types.EventsOptions{Filters: f})
-
 	d.log.Info("docker: watching container events")
 
-	for {
-		select {
-		case <-d.stopCh:
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		case err := <-errCh:
-			d.log.Error("docker: event stream error: %v", err)
-			return err
-		case msg := <-msgCh:
-			d.handleEvent(ctx, msg)
-		}
+	cmd := exec.CommandContext(ctx, "docker", "events",
+		"--filter", "type=container",
+		"--filter", "event=start",
+		"--filter", "event=die",
+		"--filter", "event=destroy",
+		"--filter", "event=pause",
+		"--filter", "event=unpause",
+		"--format", "{{json .}}",
+	)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
 	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("docker: events start: %w", err)
+	}
+
+	decoder := json.NewDecoder(stdout)
+	go func() {
+		for {
+			select {
+			case <-d.stopCh:
+				cmd.Process.Kill()
+				return
+			case <-ctx.Done():
+				cmd.Process.Kill()
+				return
+			default:
+				var evt struct {
+					Action string `json:"Action"`
+					Actor  struct {
+						ID string `json:"ID"`
+					} `json:"Actor"`
+				}
+				if err := decoder.Decode(&evt); err != nil {
+					return
+				}
+				d.handleEvent(ctx, evt.Action, evt.Actor.ID)
+			}
+		}
+	}()
+
+	return nil
 }
 
-func (d *Discovery) handleEvent(ctx context.Context, msg events.Message) {
-	containerID := msg.Actor.ID
-	d.log.Debug("docker: event %s on %s", msg.Action, containerID[:12])
+func (d *Discovery) handleEvent(ctx context.Context, action, containerID string) {
+	d.log.Debug("docker: event %s on %s", action, shortID(containerID))
 
-	switch msg.Action {
+	switch action {
 	case "start", "unpause":
-		d.refreshContainer(ctx, containerID, "started")
+		cont, err := d.inspectContainer(ctx, containerID)
+		if err != nil {
+			d.log.Warn("docker: re-inspect %s: %v", shortID(containerID), err)
+			return
+		}
+		d.mu.Lock()
+		d.containers[containerID] = cont
+		d.mu.Unlock()
+		if d.callback != nil {
+			d.callback(DiscoveryEvent{Type: "started", Container: cont})
+		}
 	case "die", "pause":
-		d.markStopped(containerID, string(msg.Action))
+		d.mu.Lock()
+		if cont, ok := d.containers[containerID]; ok {
+			cont.State = models.StateStopped
+			if d.callback != nil {
+				d.callback(DiscoveryEvent{Type: "stopped", Container: cont})
+			}
+		}
+		d.mu.Unlock()
 	case "destroy":
 		d.mu.Lock()
 		delete(d.containers, containerID)
 		d.mu.Unlock()
-		d.log.Info("docker: container destroyed %s", containerID[:12])
-	}
-}
-
-func (d *Discovery) refreshContainer(ctx context.Context, id, eventType string) {
-	inspect, err := d.cli.ContainerInspect(ctx, id)
-	if err != nil {
-		d.log.Warn("docker: re-inspect %s: %v", id[:12], err)
-		return
-	}
-
-	cont := d.inspectToContainer(&inspect)
-
-	d.mu.Lock()
-	d.containers[id] = cont
-	d.mu.Unlock()
-
-	if d.callback != nil {
-		d.callback(DiscoveryEvent{Type: eventType, Container: cont})
-	}
-}
-
-func (d *Discovery) markStopped(id, action string) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	if cont, ok := d.containers[id]; ok {
-		cont.State = models.StateStopped
-		if d.callback != nil {
-			d.callback(DiscoveryEvent{Type: "stopped", Container: cont})
-		}
+		d.log.Info("docker: container destroyed %s", shortID(containerID))
 	}
 }
 
@@ -248,67 +263,136 @@ func (d *Discovery) Count() int {
 
 // Stop signals the discovery service to stop.
 func (d *Discovery) Stop() {
-	close(d.stopCh)
+	select {
+	case <-d.stopCh:
+	default:
+		close(d.stopCh)
+	}
 }
 
-// Close closes the Docker client connection.
+// Close closes resources (no-op for CLI-based discovery).
 func (d *Discovery) Close() error {
-	return d.cli.Close()
+	d.Stop()
+	return nil
 }
 
 // HealthCheck verifies the Docker daemon is reachable.
 func (d *Discovery) HealthCheck(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	_, err := d.cli.Ping(ctx)
-	return err
+	cmd := exec.CommandContext(ctx, "docker", "info")
+	return cmd.Run()
 }
 
 // ─── Private Helpers ──────────────────────────────────────────────────────────
 
-func (d *Discovery) inspectToContainer(inspect *types.ContainerJSON) *models.Container {
+// dockerInspectJSON is the JSON structure returned by `docker inspect`.
+type dockerInspectJSON struct {
+	ID    string `json:"Id"`
+	Name  string `json:"Name"`
+	State struct {
+		Status string `json:"Status"`
+		Pid    int    `json:"Pid"`
+	} `json:"State"`
+	Config struct {
+		Labels map[string]string `json:"Labels"`
+	} `json:"Config"`
+	HostConfig struct {
+		RestartPolicy struct {
+			Name string `json:"Name"`
+		} `json:"RestartPolicy"`
+	} `json:"HostConfig"`
+	NetworkSettings struct {
+		Networks map[string]struct {
+			IPAddress string `json:"IPAddress"`
+		} `json:"Networks"`
+		Ports map[string][]struct {
+			HostIP   string `json:"HostIp"`
+			HostPort string `json:"HostPort"`
+		} `json:"Ports"`
+	} `json:"NetworkSettings"`
+}
+
+func (d *Discovery) inspectContainer(ctx context.Context, id string) (*models.Container, error) {
+	cmd := exec.CommandContext(ctx, "docker", "inspect", id)
+	// Use Output() instead of CombinedOutput() to separate stderr (warnings)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("docker: inspect %s: %w", shortID(id), err)
+	}
+
+	// Find JSON array start in case stderr leaked into output
+	start := strings.Index(string(out), "[")
+	if start >= 0 {
+		out = out[start:]
+	}
+
+	var inspects []dockerInspectJSON
+	if err := json.Unmarshal(out, &inspects); err != nil {
+		return nil, fmt.Errorf("docker: parse inspect: %w", err)
+	}
+	if len(inspects) == 0 {
+		return nil, fmt.Errorf("docker: empty inspect for %s", shortID(id))
+	}
+
+	inspect := inspects[0]
 	now := time.Now()
+
 	c := &models.Container{
 		ID:            inspect.ID,
 		Name:          strings.TrimPrefix(inspect.Name, "/"),
 		PID:           inspect.State.Pid,
 		State:         dockerStateToModel(inspect.State.Status),
-		NetworkName:   detectNetworkName(inspect),
-		IPAddress:     detectIPAddress(inspect),
 		Labels:        inspect.Config.Labels,
-		RestartPolicy: string(inspect.HostConfig.RestartPolicy.Name),
+		RestartPolicy: inspect.HostConfig.RestartPolicy.Name,
 		LastSeen:      now,
 		FirstSeen:     now,
 		Enabled:       true,
 		History:       true,
 	}
 
-	// Detect veth interface from /sys/class/net/<iface>/ifindex
+	// Detect veth interface
 	c.VethInterface = detectVeth(inspect.State.Pid, inspect.ID)
 
+	// Detect network name and IP
+	for name, net := range inspect.NetworkSettings.Networks {
+		c.NetworkName = name
+		c.IPAddress = net.IPAddress
+		break
+	}
+
 	// Map ports
-	for port, bindings := range inspect.NetworkSettings.Ports {
+	for portProto, bindings := range inspect.NetworkSettings.Ports {
+		parts := strings.SplitN(portProto, "/", 2)
+		containerPort, _ := strconv.Atoi(parts[0])
+		protocol := "tcp"
+		if len(parts) > 1 {
+			protocol = parts[1]
+		}
 		for _, b := range bindings {
+			hostPort, _ := strconv.Atoi(b.HostPort)
 			c.Ports = append(c.Ports, models.PortMapping{
-				ContainerPort: port.Int(),
-				HostPort:      parseHostPort(b.HostPort),
-				Protocol:      port.Proto(),
+				ContainerPort: containerPort,
+				HostPort:      hostPort,
+				Protocol:      protocol,
 				HostIP:        b.HostIP,
 			})
 		}
 	}
 
-	// Mark if previously known (preserve FirstSeen)
+	// Preserve FirstSeen from existing record
 	d.mu.RLock()
 	if existing, ok := d.containers[inspect.ID]; ok {
 		c.FirstSeen = existing.FirstSeen
+		d.mu.RUnlock()
+	} else {
+		d.mu.RUnlock()
 	}
-	d.mu.RUnlock()
 
 	// Apply label overrides
 	applyLabels(c, inspect.Config.Labels)
 
-	return c
+	return c, nil
 }
 
 func dockerStateToModel(status string) models.ContainerState {
@@ -324,31 +408,11 @@ func dockerStateToModel(status string) models.ContainerState {
 	}
 }
 
-func detectNetworkName(inspect *types.ContainerJSON) string {
-	for name := range inspect.NetworkSettings.Networks {
-		return name
-	}
-	return ""
-}
-
-func detectIPAddress(inspect *types.ContainerJSON) string {
-	for _, net := range inspect.NetworkSettings.Networks {
-		if net.IPAddress != "" {
-			return net.IPAddress
-		}
-	}
-	return ""
-}
-
-// detectVeth finds the veth interface for a container by matching ifindex.
-// It reads /proc/<pid>/net/if_inet6 or walks /sys/class/net/<container-id>*/.
 func detectVeth(pid int, containerID string) string {
 	if pid <= 0 {
 		return ""
 	}
 
-	// Try symlink detection: /proc/<pid>/ns/net -> net:[inode]
-	// Then find matching veth in /sys/class/net/<iface>/iflink
 	entries, err := os.ReadDir("/sys/class/net")
 	if err != nil {
 		return ""
@@ -358,42 +422,20 @@ func detectVeth(pid int, containerID string) string {
 		if !strings.HasPrefix(entry.Name(), "veth") {
 			continue
 		}
-		// Quick heuristic: check if index in /sys/class/net/<veth>/ifindex matches
-		iflinkPath := fmt.Sprintf("/sys/class/net/%s/ifindex", entry.Name())
-		data, err := os.ReadFile(iflinkPath)
-		if err != nil {
-			continue
-		}
-		// The peer ifindex from the container namespace. We'd need to cross-reference
-		// with /proc/<pid>/net/ — for now, return the first veth as fallback.
-		// In production, use netlink to get the peer index properly.
-		_ = data
-		// Return the first veth; refine via netlink in the tc package.
-		if strings.Contains(entry.Name(), "veth") {
-			return entry.Name()
-		}
+		return entry.Name()
 	}
 	return ""
 }
 
-func parseHostPort(s string) int {
-	var p int
-	fmt.Sscanf(s, "%d", &p)
-	return p
-}
-
-// applyLabels extracts bandwidth configuration from Docker labels.
 func applyLabels(c *models.Container, labels map[string]string) {
 	if labels == nil {
 		return
 	}
 
-	// bandwidth.enabled
 	if v, ok := labels["bandwidth.enabled"]; ok {
 		c.Enabled = v == "true" || v == "1"
 	}
 
-	// bandwidth.speed=250mbit or bandwidth.speed=100
 	if v, ok := labels["bandwidth.speed"]; ok {
 		speed := parseSpeed(v)
 		if speed > 0 {
@@ -402,7 +444,6 @@ func applyLabels(c *models.Container, labels map[string]string) {
 		}
 	}
 
-	// bandwidth.daily_quota=500GB or bandwidth.daily_quota=500
 	if v, ok := labels["bandwidth.daily_quota"]; ok {
 		quota := parseQuota(v)
 		if quota > 0 {
@@ -410,34 +451,28 @@ func applyLabels(c *models.Container, labels map[string]string) {
 		}
 	}
 
-	// bandwidth.warning=90
 	if v, ok := labels["bandwidth.warning"]; ok {
 		fmt.Sscanf(v, "%f", &c.WarningPercent)
 	}
 
-	// bandwidth.webhook=true
 	if v, ok := labels["bandwidth.webhook"]; ok {
 		c.Webhook = v == "true" || v == "1"
 	}
 
-	// bandwidth.history=false
 	if v, ok := labels["bandwidth.history"]; ok {
 		c.History = v != "false" && v != "0"
 	}
 
-	// bandwidth.priority=premium
 	if v, ok := labels["bandwidth.priority"]; ok {
 		c.Priority = v
 	}
 }
 
-// parseSpeed parses a speed string like "250mbit", "1gbit", "100".
 func parseSpeed(s string) float64 {
 	s = strings.ToLower(strings.TrimSpace(s))
 	var value float64
 	var unit string
 	fmt.Sscanf(s, "%f%s", &value, &unit)
-
 	switch unit {
 	case "kbit", "kbps":
 		return value / 1000
@@ -450,13 +485,11 @@ func parseSpeed(s string) float64 {
 	}
 }
 
-// parseQuota parses a quota string like "500GB", "1TB", "500".
 func parseQuota(s string) float64 {
 	s = strings.ToLower(strings.TrimSpace(s))
 	var value float64
 	var unit string
 	fmt.Sscanf(s, "%f%s", &value, &unit)
-
 	switch unit {
 	case "mb":
 		return value / 1000
@@ -467,4 +500,12 @@ func parseQuota(s string) float64 {
 	default:
 		return value
 	}
+}
+
+// shortID returns a safe truncated container ID for logging.
+func shortID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
 }
