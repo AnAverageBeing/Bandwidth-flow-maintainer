@@ -111,23 +111,20 @@ header "Step 2/7: Preparing Build"
 ok "Source directory: $REPO_DIR"
 cd "$REPO_DIR"
 
-# ─── Step 3: Install Go Dependencies ────────────────────────────────────────────
-header "Step 3/7: Resolving Go Modules"
-
-if go mod download 2>/dev/null; then
-    ok "Go modules: downloaded"
-else
-    warn "Module download had warnings (non-fatal)"
-fi
+# ─── Step 3: Skip (go build handles modules automatically) ──────────────────
+header "Step 3/7: Build will resolve modules automatically"
+ok "Module resolution: handled by go build"
 
 # ─── Step 4: Compile Binaries ──────────────────────────────────────────────────
 header "Step 4/7: Compiling Binaries"
 
-# Build commands use GOTOOLCHAIN=auto so Go auto-downloads the required version
+# Force go.mod to stay at go 1.21 (some deps try to upgrade it)
+sed -i 's/^go 1\.[0-9]\+/go 1.21/' "$REPO_DIR/go.mod" 2>/dev/null || true
 export GOTOOLCHAIN=auto
+export GOFLAGS="-mod=mod"
 
 log "Building bandwidth (CLI)..."
-if CGO_ENABLED=0 GOTOOLCHAIN=auto go build -o "$REPO_DIR/build/bandwidth" -ldflags="-s -w" ./cmd/bandwidth/ 2>/tmp/build-cli.log; then
+if CGO_ENABLED=0 go build -o "$REPO_DIR/build/bandwidth" -ldflags="-s -w" ./cmd/bandwidth/ 2>/tmp/build-cli.log; then
     ok "bandwidth CLI: compiled"
 else
     fail "bandwidth CLI: FAILED"
