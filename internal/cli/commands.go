@@ -7,7 +7,9 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/AnAverageBeing/Bandwidth-flow-maintainer/pkg/models"
 )
@@ -136,7 +138,12 @@ func (c *CLI) Configure() {
 			return
 		}
 		fmt.Println("✓ Configuration saved to", configPath)
-		fmt.Println("  Run 'bandwidth reapply' to apply changes")
+		// Reload config by restarting daemon so new values take effect
+		fmt.Println("  Restarting daemon to apply new settings...")
+		exec.Command("systemctl", "restart", "bandwidth").Run()
+		time.Sleep(2 * time.Second)
+		fmt.Println("  Reapplying TC rules...")
+		c.Reapply()
 	} else {
 		fmt.Println("Configuration unchanged.")
 	}
@@ -146,8 +153,13 @@ func extractYAMLValue(yamlStr, key string) string {
 	lines := strings.Split(yamlStr, "\n")
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, key+":") {
+		// Only match actual key (not indented sub-keys)
+		if strings.HasPrefix(trimmed, key+":") && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
 			val := strings.TrimPrefix(trimmed, key+":")
+			// Strip inline YAML comments
+			if idx := strings.Index(val, "#"); idx >= 0 {
+				val = val[:idx]
+			}
 			val = strings.TrimSpace(val)
 			val = strings.Trim(val, "\"")
 			return val
