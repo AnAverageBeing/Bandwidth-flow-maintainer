@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -38,6 +39,7 @@ Usage:
 
 Commands:
   setup           Interactive setup wizard
+  configure       Interactive configuration wizard
   reapply         Reapply tc rules to all containers
   reload          Reload configuration
   status          Show daemon status
@@ -68,15 +70,103 @@ Commands:
 
 // Setup runs the interactive configuration wizard.
 func (c *CLI) Setup() {
-	fmt.Println("╔══════════════════════════════════════════════╗")
-	fmt.Println("║   Bandwidth Manager Interactive Setup       ║")
-	fmt.Println("╚══════════════════════════════════════════════╝")
+	c.Configure()
+}
+
+// Configure runs the interactive configuration wizard.
+func (c *CLI) Configure() {
+	fmt.Println("╔══════════════════════════════════════════════════╗")
+	fmt.Println("║   Bandwidth Manager — Interactive Config        ║")
+	fmt.Println("╚══════════════════════════════════════════════════╝")
+	fmt.Println()
+	fmt.Println("Configure each setting. Press Enter to keep [current value].")
 	fmt.Println()
 
-	// This is a stub that would walk through config values.
-	// In production, it prompts for each setting interactively.
-	fmt.Println("Setup wizard would prompt for configuration values.")
-	fmt.Println("Run 'bandwidth config' to see current configuration.")
+	reader := bufio.NewReader(os.Stdin)
+	configPath := "/etc/bandwidth/config.yaml"
+
+	// Load existing config
+	cfgData, err := os.ReadFile(configPath)
+	if err != nil {
+		fmt.Printf("Cannot read config: %v\n", err)
+		return
+	}
+	cfgStr := string(cfgData)
+
+	type prompt struct {
+		key        string
+		label      string
+		defaultVal string
+	}
+	prompts := []prompt{
+		{"default_rx_mbps", "Default download speed (Mbps)", "100"},
+		{"default_tx_mbps", "Default upload speed (Mbps)", "100"},
+		{"default_ceil_mbps", "Max burst ceiling (Mbps)", "200"},
+		{"default_quota_gb", "Default daily quota (GB, 0=unlimited)", "500"},
+		{"exceeded_speed_rx_mbps", "Throttle download when quota exceeded (Mbps)", "1"},
+		{"exceeded_speed_tx_mbps", "Throttle upload when quota exceeded (Mbps)", "1"},
+		{"warning_percent", "Warning threshold (%% of quota)", "90"},
+		{"poll_interval", "Poll interval (e.g. 5s, 10s)", "5s"},
+		{"discovery_interval", "Discovery scan interval", "10s"},
+		{"timezone", "Timezone for midnight reset", "Asia/Kolkata"},
+		{"log_level", "Log level (debug/info/warn/error)", "info"},
+	}
+
+	for _, p := range prompts {
+		current := extractYAMLValue(cfgStr, p.key)
+		if current == "" {
+			current = p.defaultVal
+		}
+		fmt.Printf("  %s [%s]: ", p.label, current)
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+		if input != "" {
+			cfgStr = replaceYAMLValue(cfgStr, p.key, input)
+		}
+	}
+
+	fmt.Println()
+	fmt.Print("Save configuration? [Y/n]: ")
+	save, _ := reader.ReadString('\n')
+	save = strings.TrimSpace(strings.ToLower(save))
+
+	if save == "" || save == "y" || save == "yes" {
+		if err := os.WriteFile(configPath, []byte(cfgStr), 0644); err != nil {
+			fmt.Printf("Error saving config: %v\n", err)
+			return
+		}
+		fmt.Println("✓ Configuration saved to", configPath)
+		fmt.Println("  Run 'bandwidth reapply' to apply changes")
+	} else {
+		fmt.Println("Configuration unchanged.")
+	}
+}
+
+func extractYAMLValue(yamlStr, key string) string {
+	lines := strings.Split(yamlStr, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, key+":") {
+			val := strings.TrimPrefix(trimmed, key+":")
+			val = strings.TrimSpace(val)
+			val = strings.Trim(val, "\"")
+			return val
+		}
+	}
+	return ""
+}
+
+func replaceYAMLValue(yamlStr, key, newVal string) string {
+	lines := strings.Split(yamlStr, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, key+":") {
+			prefix := line[:strings.Index(line, key)]
+			lines[i] = prefix + key + ": " + newVal
+			break
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // Status fetches and displays daemon status.
@@ -255,8 +345,24 @@ func (c *CLI) Limits() {
 		return
 	}
 
-	// Pretty-print limits
-	fmt.Printf("Raw response: %s\n", string(resp.Data))
+	var limits []struct {
+		Container string  `json:"container"`
+		RxMbps    float64 `json:"rx_mbps"`
+		TxMbps    float64 `json:"tx_mbps"`
+		QuotaGB   float64 `json:"quota_gb"`
+		UsedGB    float64 `json:"used_gb"`
+	}
+	if err := json.Unmarshal(resp.Data, &limits); err != nil {
+		fmt.Printf("Error parsing response: %v\n", err)
+		return
+	}
+
+	fmt.Printf("%-35s %10s %10s %10s %10s\n", "CONTAINER", "RX_Mbps", "TX_Mbps", "USED_GB", "QUOTA_GB")
+	fmt.Println(strings.Repeat("-", 80))
+	for _, l := range limits {
+		fmt.Printf("%-35s %10.1f %10.1f %10.2f %10.1f\n",
+			truncate(l.Container, 35), l.RxMbps, l.TxMbps, l.UsedGB, l.QuotaGB)
+	}
 }
 
 // Daemon shows daemon info.

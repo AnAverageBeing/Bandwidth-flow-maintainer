@@ -21,8 +21,6 @@ func main() {
 	args := os.Args[2:]
 
 	switch cmd {
-	case "setup":
-		c.Setup()
 	case "reapply":
 		c.Reapply()
 	case "reload":
@@ -63,6 +61,8 @@ func main() {
 		c.Logs()
 	case "config":
 		c.Config()
+	case "configure", "setup":
+		c.Configure()
 	case "list":
 		c.List()
 	case "version":

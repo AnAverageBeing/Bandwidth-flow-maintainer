@@ -311,6 +311,15 @@ echo " Logs:          /var/log/bandwidth/bandwidth.log"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
+# Offer interactive configuration
+echo ""
+read -p "Would you like to configure settings now? [Y/n]: " do_config
+do_config=${do_config:-y}
+if [ "$do_config" = "y" ] || [ "$do_config" = "Y" ] || [ "$do_config" = "yes" ]; then
+    "$INSTALL_DIR/bandwidth" configure
+    "$INSTALL_DIR/bandwidth" reapply
+fi
+
 # Cleanup
 rm -rf "$REPO_DIR/build" 2>/dev/null || true
 
