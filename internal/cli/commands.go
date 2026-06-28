@@ -11,8 +11,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AnAverageBeing/Bandwidth-flow-maintainer/internal/tui"
 	"github.com/AnAverageBeing/Bandwidth-flow-maintainer/pkg/models"
+	tea "github.com/charmbracelet/bubbletea"
 )
+
+// Top launches the bandwidth monitoring TUI.
+func (c *CLI) Top() {
+	m := tui.NewTopModel()
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		fmt.Printf("Error launching TUI: %v\n", err)
+	}
+}
 
 // CLI communicates with the bandwidth daemon over a Unix socket.
 type CLI struct {
@@ -66,6 +77,7 @@ Commands:
   cleanup         Run cleanup
   stats           Show bandwidth statistics
   limits          Show configured limits
+  top             Live bandwidth monitoring TUI
   daemon          Show daemon information
   help            Show this help`)
 }

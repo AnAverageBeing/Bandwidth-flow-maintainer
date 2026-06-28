@@ -93,6 +93,8 @@ func main() {
 		c.Stats()
 	case "limits":
 		c.Limits()
+	case "top":
+		c.Top()
 	case "daemon":
 		c.Daemon()
 	case "help", "-h", "--help":
