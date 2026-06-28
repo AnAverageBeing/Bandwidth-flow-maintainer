@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/AnAverageBeing/Bandwidth-flow-maintainer/pkg/models"
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // DB wraps a SQLite connection with convenience methods for the bandwidth system.
@@ -30,7 +30,7 @@ type Config struct {
 
 // Open initializes the SQLite database, applies pragmas, and runs migrations.
 func Open(cfg Config) (*DB, error) {
-	conn, err := sql.Open("sqlite3", cfg.Path+"?_journal_mode="+cfg.JournalMode+
+	conn, err := sql.Open("sqlite", cfg.Path+"?_journal_mode="+cfg.JournalMode+
 		"&_synchronous="+cfg.Synchronous+
 		"&_cache_size="+fmt.Sprintf("%d", cfg.CacheSizeKB))
 	if err != nil {

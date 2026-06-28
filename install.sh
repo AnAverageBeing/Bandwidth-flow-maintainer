@@ -76,18 +76,18 @@ else
 fi
 
 if $NEED_GO; then
-    log "Installing Go 1.22..."
-    GO_URL="https://go.dev/dl/go1.22.12.linux-amd64.tar.gz"
+    log "Installing Go 1.23..."
+    GO_URL="https://go.dev/dl/go1.23.6.linux-amd64.tar.gz"
     curl -sSL "$GO_URL" -o /tmp/go.tar.gz
     tar -C /usr/local -xzf /tmp/go.tar.gz
     export PATH=$PATH:/usr/local/go/bin
     echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile 2>/dev/null || true
     rm -f /tmp/go.tar.gz
-    ok "Go 1.22: installed"
+    ok "Go 1.23: installed"
 fi
 
-# Prevent Go from auto-downloading newer toolchains
-export GOTOOLCHAIN=local
+# Ensure Go is in PATH for this session
+export PATH=$PATH:/usr/local/go/bin:~/go/bin
 export PATH=$PATH:/usr/local/go/bin:~/go/bin
 
 # Check Docker (needs sudo or docker group)
@@ -124,7 +124,7 @@ fi
 header "Step 4/7: Compiling Binaries"
 
 log "Building bandwidth (CLI)..."
-if go build -o "$REPO_DIR/build/bandwidth" -ldflags="-s -w" ./cmd/bandwidth/ 2>/tmp/build-cli.log; then
+if CGO_ENABLED=1 go build -o "$REPO_DIR/build/bandwidth" -ldflags="-s -w" ./cmd/bandwidth/ 2>/tmp/build-cli.log; then
     ok "bandwidth CLI: compiled"
 else
     fail "bandwidth CLI: FAILED"
@@ -132,7 +132,7 @@ else
 fi
 
 log "Building bandwidthd (daemon)..."
-if go build -o "$REPO_DIR/build/bandwidthd" -ldflags="-s -w" ./cmd/bandwidthd/ 2>/tmp/build-daemon.log; then
+if CGO_ENABLED=1 go build -o "$REPO_DIR/build/bandwidthd" -ldflags="-s -w" ./cmd/bandwidthd/ 2>/tmp/build-daemon.log; then
     ok "bandwidthd daemon: compiled"
 else
     fail "bandwidthd daemon: FAILED"
