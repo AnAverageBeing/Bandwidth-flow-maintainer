@@ -63,7 +63,7 @@ func (m *Manager) Run(ctx context.Context) error {
 	}
 
 	// 3. Repair tc rules (remove rules for containers that no longer exist)
-	if m.tc != nil {
+	if m.tc != nil && m.discovery != nil {
 		containers := m.discovery.ListContainers()
 		m.tc.RepairRules(containers)
 	}

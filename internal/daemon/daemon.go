@@ -105,7 +105,7 @@ func New(cfg *config.Config) (*Daemon, error) {
 		}
 	}
 
-	// Docker discovery
+	// Docker discovery (non-fatal — daemon retries if Docker is unavailable)
 	discCfg := docker.Config{
 		Endpoint:    cfg.Docker.Endpoint,
 		APIVersion:  cfg.Docker.APIVersion,
@@ -116,7 +116,9 @@ func New(cfg *config.Config) (*Daemon, error) {
 	}
 	disc, err := docker.NewDiscovery(discCfg, l)
 	if err != nil {
-		return nil, fmt.Errorf("daemon: docker: %w", err)
+		l.Warn("daemon: docker not available: %v — will retry when Docker starts", err)
+		// Create a no-op discovery that returns empty results
+		disc = nil
 	}
 
 	// TC manager
@@ -236,7 +238,7 @@ func (d *Daemon) Start(ctx context.Context) error {
 	// Initial discovery (with timeout)
 	d.log.Info("daemon: starting initial discovery...")
 	discoveryCtx, discoveryCancel := context.WithTimeout(ctx, 15*time.Second)
-	containers, err := d.discovery.Discover(discoveryCtx)
+	containers, err := d.safeDiscover(discoveryCtx)
 	discoveryCancel()
 	if err != nil {
 		d.log.Error("daemon: initial discovery: %v", err)
@@ -287,7 +289,7 @@ func (d *Daemon) Start(ctx context.Context) error {
 
 	// Register scheduled jobs
 	d.sched.AddJob("discovery", d.cfg.Docker.DiscoveryInterval, func(ctx context.Context) error {
-		containers, err := d.discovery.Discover(ctx)
+		containers, err := d.safeDiscover(ctx)
 		if err != nil {
 			return err
 		}
@@ -304,7 +306,7 @@ func (d *Daemon) Start(ctx context.Context) error {
 			return err
 		}
 		if d.quotaMgr.ShouldReset(loc) {
-			containers := d.discovery.ListContainers()
+			containers := d.safeListContainers()
 			count := d.quotaMgr.ResetDaily(containers)
 			d.db.ResetDailyUsage()
 			d.whMgr.Send(models.EventReset, "", fmt.Sprintf("Daily quota reset: %d containers", count), "info")
@@ -343,12 +345,14 @@ func (d *Daemon) Start(ctx context.Context) error {
 		d.log.Warn("daemon: socket listener: %v", err)
 	}
 
-	// Start Docker event watcher
-	go func() {
-		if err := d.discovery.WatchEvents(ctx); err != nil {
-			d.log.Error("daemon: docker events: %v", err)
-		}
-	}()
+	// Start Docker event watcher (only if discovery is available)
+	if d.discovery != nil {
+		go func() {
+			if err := d.discovery.WatchEvents(ctx); err != nil {
+				d.log.Error("daemon: docker events: %v", err)
+			}
+		}()
+	}
 
 	// Main polling loop
 	pollTicker := time.NewTicker(d.cfg.Bandwidth.PollInterval)
@@ -371,7 +375,7 @@ func (d *Daemon) Start(ctx context.Context) error {
 }
 
 func (d *Daemon) poll(ctx context.Context) {
-	containers := d.discovery.ListContainers()
+	containers := d.safeListContainers()
 
 	for _, c := range containers {
 		if c.State != models.StateRunning {
@@ -433,8 +437,10 @@ func (d *Daemon) Stop() {
 	// Stop webhook manager
 	d.whMgr.Stop()
 
-	// Close docker client
-	d.discovery.Close()
+	// Close docker client (if available)
+	if d.discovery != nil {
+		d.discovery.Close()
+	}
 
 	// Close database
 	d.db.Close()
@@ -510,21 +516,21 @@ func (d *Daemon) handleSocketConn(conn net.Conn) {
 	case "doctor":
 		data = d.health.Run()
 	case "list":
-		containers := d.discovery.ListContainers()
+		containers := d.safeListContainers()
 		data = map[string]interface{}{"containers": containers, "count": len(containers)}
 	case "reapply":
 		err = d.reapply()
 	case "reload":
 		err = d.reload()
 	case "stats":
-		containers := d.discovery.ListContainers()
+		containers := d.safeListContainers()
 		data = containers
 	case "health":
 		data = d.health.Run()
 	case "daemon":
 		data = d.getStatus()
 	case "limits":
-		containers := d.discovery.ListContainers()
+		containers := d.safeListContainers()
 		limits := make([]map[string]interface{}, 0)
 		for _, c := range containers {
 			limits = append(limits, map[string]interface{}{
@@ -557,12 +563,17 @@ func (d *Daemon) writeResponse(conn net.Conn, ok bool, data interface{}, errMsg 
 }
 
 func (d *Daemon) getStatus() *models.DaemonStatus {
-	containers := d.discovery.ListContainers()
+	containers := d.safeListContainers()
 	exceeded := 0
 	for _, c := range containers {
 		if c.State == models.StateExceeded {
 			exceeded++
 		}
+	}
+
+	dockerHealthy := false
+	if d.discovery != nil {
+		dockerHealthy = d.discovery.HealthCheck(context.Background()) == nil
 	}
 
 	return &models.DaemonStatus{
@@ -573,7 +584,7 @@ func (d *Daemon) getStatus() *models.DaemonStatus {
 		ContainerCount:  len(containers),
 		ManagedCount:    d.tcMgr.RuleCount(),
 		ExceededCount:   exceeded,
-		DockerHealthy:   d.discovery.HealthCheck(context.Background()) == nil,
+		DockerHealthy:   dockerHealthy,
 		DatabaseOK:      d.db.Ping() == nil,
 		TCHealthy:       len(d.tcMgr.VerifyAll()) == 0,
 		TCRulesApplied:  int64(d.tcMgr.RuleCount()),
@@ -583,8 +594,24 @@ func (d *Daemon) getStatus() *models.DaemonStatus {
 	}
 }
 
+// safeListContainers returns containers from discovery, or empty slice if discovery is nil.
+func (d *Daemon) safeListContainers() []*models.Container {
+	if d.discovery == nil {
+		return nil
+	}
+	return d.discovery.ListContainers()
+}
+
+// safeDiscover runs discovery if available, returns empty slice otherwise.
+func (d *Daemon) safeDiscover(ctx context.Context) ([]*models.Container, error) {
+	if d.discovery == nil {
+		return nil, nil
+	}
+	return d.discovery.Discover(ctx)
+}
+
 func (d *Daemon) reapply() error {
-	containers := d.discovery.ListContainers()
+	containers := d.safeListContainers()
 	for _, c := range containers {
 		if c.Enabled && c.State == models.StateRunning {
 			if err := d.tcMgr.ApplyLimit(c); err != nil {

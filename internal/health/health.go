@@ -75,6 +75,14 @@ func (c *Checker) checkDocker() models.HealthCheck {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
+	if c.discovery == nil {
+		return models.HealthCheck{
+			Name:    "Docker",
+			Status:  "warning",
+			Message: "Docker discovery not initialized",
+		}
+	}
+
 	if err := c.discovery.HealthCheck(ctx); err != nil {
 		return models.HealthCheck{
 			Name:    "Docker",
