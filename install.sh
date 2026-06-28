@@ -60,30 +60,43 @@ for cmd in curl git make; do
     ok "$cmd: available"
 done
 
-# Check/install Go
+# Check/install Go (need 1.21+)
+NEED_GO=false
 if command -v go &>/dev/null; then
-    GO_VER=$(go version | grep -oP 'go\K[0-9]+\.[0-9]+')
-    ok "Go $GO_VER: installed"
+    GO_VER=$(go version | grep -oP 'go[0-9]+\.[0-9]+' | head -1 | grep -oP '[0-9]+\.[0-9]+')
+    GO_MAJOR=$(echo "$GO_VER" | cut -d. -f1)
+    GO_MINOR=$(echo "$GO_VER" | cut -d. -f2)
+    if [ "$GO_MAJOR" -ge 2 ] 2>/dev/null || { [ "$GO_MAJOR" -eq 1 ] && [ "$GO_MINOR" -ge 21 ]; } 2>/dev/null; then
+        ok "Go $GO_VER: suitable"
+    else
+        warn "Go $GO_VER too old (need 1.21+) — will install Go 1.22"
+        NEED_GO=true
+    fi
 else
+    NEED_GO=true
+fi
+
+if $NEED_GO; then
     log "Installing Go 1.22..."
-    GO_URL="https://go.dev/dl/go1.22.5.linux-amd64.tar.gz"
+    GO_URL="https://go.dev/dl/go1.22.12.linux-amd64.tar.gz"
     curl -sSL "$GO_URL" -o /tmp/go.tar.gz
     tar -C /usr/local -xzf /tmp/go.tar.gz
     export PATH=$PATH:/usr/local/go/bin
-    echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile
+    echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile 2>/dev/null || true
     rm -f /tmp/go.tar.gz
     ok "Go 1.22: installed"
 fi
 
-# Ensure Go is in PATH for this session
+# Prevent Go from auto-downloading newer toolchains
+export GOTOOLCHAIN=local
 export PATH=$PATH:/usr/local/go/bin:~/go/bin
 
-# Check Docker
-if command -v docker &>/dev/null; then
-    DOCKER_VER=$(docker --version | grep -oP '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-    ok "Docker $DOCKER_VER: installed"
+# Check Docker (needs sudo or docker group)
+if sudo docker info &>/dev/null 2>&1 || docker info &>/dev/null 2>&1; then
+    DOCKER_VER=$(sudo docker --version 2>/dev/null | grep -oP '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || docker --version 2>/dev/null | grep -oP '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    ok "Docker $DOCKER_VER: available"
 else
-    warn "Docker not found — please install Docker Engine"
+    warn "Docker not found — install Docker Engine for container discovery"
 fi
 
 # Check tc
