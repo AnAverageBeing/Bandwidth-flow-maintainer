@@ -56,14 +56,12 @@ func main() {
 	}()
 
 	// Wait for signal or error
-	select {
-	case err := <-errCh:
-		if err != nil && err != context.Canceled {
-			fmt.Fprintf(os.Stderr, "Daemon error: %v\n", err)
-		}
-	case sig := <-daemon.WaitForSignal():
-		fmt.Fprintf(os.Stderr, "Received signal: %v\n", sig)
-	}
+	sig := daemon.WaitForSignal()
+	fmt.Fprintf(os.Stderr, "Received signal: %v\n", sig)
+
+	// Stop daemon on signal
+	cancel()
+	_ = <-errCh
 
 	// Graceful shutdown
 	d.Stop()

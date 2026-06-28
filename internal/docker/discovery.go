@@ -154,7 +154,7 @@ func (d *Discovery) WatchEvents(ctx context.Context) error {
 		filters.Arg("event", "unpause"),
 	)
 
-	msgCh, errCh := d.cli.Events(ctx, events.ListOptions{Filters: f})
+	msgCh, errCh := d.cli.Events(ctx, types.EventsOptions{Filters: f})
 
 	d.log.Info("docker: watching container events")
 
@@ -181,7 +181,7 @@ func (d *Discovery) handleEvent(ctx context.Context, msg events.Message) {
 	case "start", "unpause":
 		d.refreshContainer(ctx, containerID, "started")
 	case "die", "pause":
-		d.markStopped(containerID, msg.Action)
+		d.markStopped(containerID, string(msg.Action))
 	case "destroy":
 		d.mu.Lock()
 		delete(d.containers, containerID)
