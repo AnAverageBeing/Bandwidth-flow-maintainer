@@ -587,3 +587,18 @@ func RunTop() error {
 	_, err := p.Run()
 	return err
 }
+
+func humanBytes(b float64) string {
+	switch {
+	case b >= 1e12:
+		return fmt.Sprintf("%.1fTB", b/1e12)
+	case b >= 1e9:
+		return fmt.Sprintf("%.1fGB", b/1e9)
+	case b >= 1e6:
+		return fmt.Sprintf("%.1fMB", b/1e6)
+	case b >= 1e3:
+		return fmt.Sprintf("%.1fKB", b/1e3)
+	default:
+		return fmt.Sprintf("%.0fB", b)
+	}
+}
