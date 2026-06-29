@@ -222,6 +222,8 @@ func New(cfg *config.Config) (*Daemon, error) {
 // Start begins the main daemon loop.
 func (d *Daemon) Start(ctx context.Context) error {
 	d.log.Info("daemon: starting bandwidth manager v1.0.0")
+	d.log.Info("daemon: developed by AnAverageBeing")
+	d.log.Info("daemon: github.com/AnAverageBeing/Bandwidth-flow-maintainer")
 
 	// Print API token prominently if API is enabled
 	if d.cfg.API.Enabled && d.cfg.API.AuthToken != "" {

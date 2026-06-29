@@ -58,6 +58,7 @@ clear
 banner "╔══════════════════════════════════════════════════════╗"
 banner "║   Bandwidth Manager — Universal Installer            ║"
 banner "║   Docker Container Bandwidth Management System       ║"
+banner "║   Developed by AnAverageBeing                        ║"
 banner "╚══════════════════════════════════════════════════════╝"
 echo ""
 
@@ -435,6 +436,7 @@ fi
 echo ""
 banner "╔══════════════════════════════════════════════════════╗"
 banner "║              INSTALLATION COMPLETE                   ║"
+banner "║   Developed by AnAverageBeing                        ║"
 banner "╚══════════════════════════════════════════════════════╝"
 echo ""
 echo -e "  Passed:  ${GREEN}$PASS${NC}"

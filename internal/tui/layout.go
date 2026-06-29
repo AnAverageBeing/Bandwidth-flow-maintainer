@@ -477,16 +477,17 @@ func (m DashboardModel) renderHeader(w int) string {
 
 	// Title with accent background
 	title := Title("⚡ Bandwidth Monitor")
+	credit := Dim.Render("by AnAverageBeing")
 	modePart := Subtext.Render("  " + modeLabel + "  ")
 	timePart := Subtext.Render(m.LastRefresh.Format("15:04:05") + "  ")
 	runtime := Subtext.Render("⏱ " + time.Since(m.StartedAt).Round(time.Second).String())
 
-	mid := w - runeWidth(title) - runeWidth(modePart) - runeWidth(timePart) - runeWidth(runtime) - 4
+	mid := w - runeWidth(title) - runeWidth(credit) - runeWidth(modePart) - runeWidth(timePart) - runeWidth(runtime) - 5
 	if mid < 1 {
 		mid = 1
 	}
 
-	line1 := title + strings.Repeat(" ", mid) + runtime + timePart
+	line1 := title + " " + credit + strings.Repeat(" ", mid) + runtime + timePart
 
 	// Speed line
 	selName := "—"

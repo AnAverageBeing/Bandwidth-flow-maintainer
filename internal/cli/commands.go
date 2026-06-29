@@ -34,49 +34,64 @@ func NewCLI(socketPath string) *CLI {
 
 // ─── Command Implementations ──────────────────────────────────────────────────
 
-// Version prints the version.
+// Version prints the version with branding.
 func (c *CLI) Version() {
-	fmt.Println("bandwidth version 1.0.0")
-	fmt.Println("Production-Grade Docker Bandwidth Manager")
+	fmt.Println("╔══════════════════════════════════════════════════════════╗")
+	fmt.Println("║  ⚡ Bandwidth Manager v1.0.0                             ║")
+	fmt.Println("║  Production-Grade Docker Bandwidth Management            ║")
+	fmt.Println("║  Developed by AnAverageBeing                             ║")
+	fmt.Println("║  github.com/AnAverageBeing/Bandwidth-flow-maintainer     ║")
+	fmt.Println("╚══════════════════════════════════════════════════════════╝")
 }
 
 // Help prints usage information.
 func (c *CLI) Help() {
-	fmt.Println(`bandwidth — Docker container bandwidth manager
-
-Usage:
-  bandwidth [command]
-
-Commands:
-  setup           Interactive setup wizard
-  configure       Interactive configuration wizard
-  reapply         Reapply tc rules to all containers
-  reload          Reload configuration
-  status          Show daemon status
-  doctor          Run health diagnostics
-  inspect <id>    Inspect a container
-  inspect-port <port> Inspect by host port
-  reset <target>  Reset quota for container/port
-  reset all       Reset all quotas
-  enable          Enable bandwidth management
-  disable         Disable bandwidth management
-  restart         Restart the daemon
-  stop            Stop the daemon
-  start           Start the daemon
-  logs            Show daemon logs
-  config          Show configuration
-  list            List all managed containers
-  version         Show version information
-  health          Health check
-  webhook test    Test webhook configuration
-  export          Export historical data
-  history <id>    Show usage history
-  cleanup         Run cleanup
-  stats           Show bandwidth statistics
-  limits          Show configured limits
-  top             Live bandwidth monitoring TUI
-  daemon          Show daemon information
-  help            Show this help`)
+	fmt.Println("╔══════════════════════════════════════════════════════════╗")
+	fmt.Println("║  ⚡ Bandwidth Manager — Docker Bandwidth Control         ║")
+	fmt.Println("║  Developed by AnAverageBeing                             ║")
+	fmt.Println("╚══════════════════════════════════════════════════════════╝")
+	fmt.Println()
+	fmt.Println("Usage:")
+	fmt.Println("  bandwidth [command]")
+	fmt.Println()
+	fmt.Println("Management:")
+	fmt.Println("  setup              Interactive setup wizard")
+	fmt.Println("  configure          Interactive configuration wizard")
+	fmt.Println("  reapply            Reapply tc rules to all containers")
+	fmt.Println("  reload             Reload configuration")
+	fmt.Println("  enable             Enable bandwidth management")
+	fmt.Println("  disable            Disable bandwidth management")
+	fmt.Println("  restart            Restart the daemon")
+	fmt.Println("  stop               Stop the daemon")
+	fmt.Println("  start              Start the daemon")
+	fmt.Println()
+	fmt.Println("Monitoring:")
+	fmt.Println("  status             Show daemon status")
+	fmt.Println("  top                Live bandwidth monitoring TUI")
+	fmt.Println("  list               List all managed containers")
+	fmt.Println("  stats              Show bandwidth statistics")
+	fmt.Println("  limits             Show configured limits")
+	fmt.Println("  health             Health check")
+	fmt.Println("  doctor             Run health diagnostics")
+	fmt.Println("  daemon             Show daemon information")
+	fmt.Println("  logs               Show daemon logs")
+	fmt.Println("  config             Show configuration")
+	fmt.Println()
+	fmt.Println("Containers:")
+	fmt.Println("  inspect <id>       Inspect a container")
+	fmt.Println("  inspect-port <p>   Inspect by host port")
+	fmt.Println("  reset <target>     Reset quota for container/port")
+	fmt.Println("  reset all          Reset all quotas")
+	fmt.Println("  history <id>       Show usage history")
+	fmt.Println()
+	fmt.Println("Other:")
+	fmt.Println("  version            Show version and credits")
+	fmt.Println("  webhook test       Test webhook configuration")
+	fmt.Println("  export             Export historical data")
+	fmt.Println("  cleanup            Run cleanup")
+	fmt.Println("  help               Show this help")
+	fmt.Println()
+	fmt.Println("GitHub: github.com/AnAverageBeing/Bandwidth-flow-maintainer")
 }
 
 // Setup runs the interactive configuration wizard.
@@ -88,6 +103,7 @@ func (c *CLI) Setup() {
 func (c *CLI) Configure() {
 	fmt.Println("╔══════════════════════════════════════════════════╗")
 	fmt.Println("║   Bandwidth Manager — Interactive Config        ║")
+	fmt.Println("║   Developed by AnAverageBeing                    ║")
 	fmt.Println("╚══════════════════════════════════════════════════╝")
 	fmt.Println()
 	fmt.Println("Configure each setting. Press Enter to keep [current value].")
@@ -269,19 +285,26 @@ func (c *CLI) Status() {
 	var status models.DaemonStatus
 	json.Unmarshal(resp.Data, &status)
 
-	fmt.Printf("Daemon Status: %s\n", status.State)
-	fmt.Printf("Version:       %s\n", status.Version)
-	fmt.Printf("Uptime:        %s\n", status.Uptime)
-	fmt.Printf("Containers:    %d (%d managed, %d exceeded)\n", status.ContainerCount, status.ManagedCount, status.ExceededCount)
-	fmt.Printf("Docker:        %s\n", healthIcon(status.DockerHealthy))
-	fmt.Printf("Database:      %s\n", healthIcon(status.DatabaseOK))
-	fmt.Printf("TC:            %s\n", healthIcon(status.TCHealthy))
-	fmt.Printf("TC Rules:      %d\n", status.TCRulesApplied)
-	fmt.Printf("Poll Interval: %ds\n", status.PollIntervalSec)
-	fmt.Printf("Timezone:      %s\n", status.Timezone)
+	fmt.Println("╔══════════════════════════════════════════════════════════╗")
+	fmt.Println("║  ⚡ Bandwidth Manager Daemon Status                     ║")
+	fmt.Println("╚══════════════════════════════════════════════════════════╝")
+	fmt.Println()
+	fmt.Printf("  State:        %s\n", status.State)
+	fmt.Printf("  Version:      %s\n", status.Version)
+	fmt.Printf("  Uptime:       %s\n", status.Uptime)
+	fmt.Printf("  Containers:   %d total (%d managed, %d exceeded)\n", status.ContainerCount, status.ManagedCount, status.ExceededCount)
+	fmt.Printf("  Docker:       %s\n", healthIcon(status.DockerHealthy))
+	fmt.Printf("  Database:     %s\n", healthIcon(status.DatabaseOK))
+	fmt.Printf("  TC Health:    %s\n", healthIcon(status.TCHealthy))
+	fmt.Printf("  TC Rules:     %d active\n", status.TCRulesApplied)
+	fmt.Printf("  Poll:         every %ds\n", status.PollIntervalSec)
+	fmt.Printf("  Timezone:     %s\n", status.Timezone)
 	if !status.LastReset.IsZero() {
-		fmt.Printf("Last Reset:    %s\n", status.LastReset.Format("2006-01-02 15:04:05"))
+		fmt.Printf("  Last Reset:   %s\n", status.LastReset.Format("2006-01-02 15:04:05"))
 	}
+	fmt.Println()
+	fmt.Println("  ── Developed by AnAverageBeing ──")
+	fmt.Println("  github.com/AnAverageBeing/Bandwidth-flow-maintainer")
 }
 
 // Doctor runs health diagnostics.
@@ -526,10 +549,14 @@ func (c *CLI) Limits() {
 		return
 	}
 
-	fmt.Printf("%-35s %10s %10s %10s %10s\n", "CONTAINER", "RX_Mbps", "TX_Mbps", "USED_GB", "QUOTA_GB")
-	fmt.Println(strings.Repeat("-", 80))
+	fmt.Println("╔══════════════════════════════════════════════════════════════════╗")
+	fmt.Println("║  📊 Bandwidth Limits — Per Docker Container                     ║")
+	fmt.Println("╚══════════════════════════════════════════════════════════════════╝")
+	fmt.Println()
+	fmt.Printf("  %-35s %10s %10s %10s %10s\n", "CONTAINER", "RX_Mbps", "TX_Mbps", "USED_GB", "QUOTA_GB")
+	fmt.Println("  " + strings.Repeat("─", 80))
 	for _, l := range limits {
-		fmt.Printf("%-35s %10.1f %10.1f %10.2f %10.1f\n",
+		fmt.Printf("  %-35s %10.1f %10.1f %10.2f %10.1f\n",
 			truncate(l.Container, 35), l.RxMbps, l.TxMbps, l.UsedGB, l.QuotaGB)
 	}
 }

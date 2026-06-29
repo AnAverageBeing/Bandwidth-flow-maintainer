@@ -2,8 +2,11 @@
 
 **Production-grade Docker bandwidth management system** — per-container speed limiting, daily traffic quotas, automatic container discovery, Linux tc enforcement, TUI, webhook notifications, and more.
 
+**Developed by [AnAverageBeing](https://github.com/AnAverageBeing)**
+
 [![Go Version](https://img.shields.io/badge/Go-1.21%2B-blue)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+[![GitHub](https://img.shields.io/badge/GitHub-AnAverageBeing%2FBandwidth--flow--maintainer-purple)](https://github.com/AnAverageBeing/Bandwidth-flow-maintainer)
 
 ---
 
