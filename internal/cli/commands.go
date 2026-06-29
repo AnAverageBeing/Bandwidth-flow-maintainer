@@ -13,14 +13,11 @@ import (
 
 	"github.com/AnAverageBeing/Bandwidth-flow-maintainer/internal/tui"
 	"github.com/AnAverageBeing/Bandwidth-flow-maintainer/pkg/models"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 // Top launches the bandwidth monitoring TUI.
 func (c *CLI) Top() {
-	m := tui.NewTopModel()
-	p := tea.NewProgram(m, tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
+	if err := tui.RunTop(); err != nil {
 		fmt.Printf("Error launching TUI: %v\n", err)
 	}
 }
