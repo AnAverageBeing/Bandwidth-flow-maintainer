@@ -332,6 +332,7 @@ if $HAS_SYSTEMD; then
         DAEMON_STARTED=true
     else
         warn "Systemd start failed — trying direct mode"
+        echo "  Journal: $(journalctl -u bandwidth --no-pager -n 5 2>/dev/null || echo 'unavailable')"
     fi
 fi
 
@@ -425,11 +426,15 @@ else
     warn "Docker: not available (container features disabled)"
 fi
 
-# 10. TUI smoke test
-if timeout 2 "$BW" top </dev/null &>/dev/null 2>&1; then
-    ok "TUI: functional"
+# 10. TUI smoke test (skip if no real terminal — BubbleTea needs a TTY)
+if [ -t 0 ] && [ -t 1 ]; then
+    if timeout 3 "$BW" top </dev/null &>/dev/null 2>&1; then
+        ok "TUI: functional"
+    else
+        warn "TUI: requires terminal (expected in SSH)"
+    fi
 else
-    warn "TUI: requires terminal (expected in SSH)"
+    warn "TUI: skipped (no TTY — expected in pipe/SSH)"
 fi
 
 # ─── Final Summary ───────────────────────────────────────────────────────────
@@ -480,17 +485,18 @@ echo " Logs:     $LOG_DIR/bandwidth.log"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # ─── Interactive Setup ───────────────────────────────────────────────────────
+# Only offer interactive config if we have a real terminal
 if [ $FAIL -eq 0 ] || [ $DAEMON_STARTED = true ]; then
-    echo ""
-    # Use /dev/tty for real terminal input (works even when piped from curl)
-    if [ -c /dev/tty ]; then
-        exec < /dev/tty
-    fi
-    read -rp "Configure settings now? [Y/n]: " do_config < /dev/tty 2>/dev/null || do_config="y"
-    do_config=${do_config:-y}
-    if [ "$do_config" = "y" ] || [ "$do_config" = "Y" ]; then
-        "$BW" configure 2>/dev/null || warn "Interactive configure unavailable"
-        "$BW" reapply 2>/dev/null || true
+    if [ -t 0 ] && [ -c /dev/tty ]; then
+        echo ""
+        read -rp "Configure settings now? [Y/n]: " do_config < /dev/tty 2>/dev/null || do_config=""
+        do_config=${do_config:-y}
+        if [ "$do_config" = "y" ] || [ "$do_config" = "Y" ]; then
+            "$BW" configure 2>/dev/null || warn "Interactive configure unavailable"
+            "$BW" reapply 2>/dev/null || true
+        fi
+    else
+        warn "Skipping interactive config (no terminal — run 'bandwidth configure' later)"
     fi
 fi
 
