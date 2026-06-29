@@ -1,52 +1,44 @@
 [Unit]
 Description=Bandwidth Manager Daemon
 Documentation=https://github.com/AnAverageBeing/Bandwidth-flow-maintainer
-After=network.target
-Wants=network.target
+After=network.target docker.service
+Wants=network.target docker.service
 
 [Service]
 Type=simple
 User=root
 ExecStart=/usr/local/bin/bandwidthd --config /etc/bandwidth/config.yaml
 ExecReload=/bin/kill -HUP $MAINPID
-ExecStop=/bin/kill -SIGTERM $MAINPID
 Restart=always
-RestartSec=10
-StartLimitInterval=60
-StartLimitBurst=5
+RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=15
 
 # Security hardening
-NoNewPrivileges=yes
+NoNewPrivileges=no
 ProtectSystem=strict
-ProtectHome=yes
-ReadWritePaths=/var/run /var/log/bandwidth /var/lib/bandwidth /sys/class/net
-ReadOnlyPaths=/etc/bandwidth
-PrivateTmp=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectControlGroups=yes
-RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6
-RestrictNamespaces=yes
-LockPersonality=yes
-MemoryDenyWriteExecute=yes
-RestrictRealtime=yes
-RestrictSUIDSGID=yes
-RemoveIPC=yes
+ProtectHome=read-only
+ReadWritePaths=/var/run /var/log/bandwidth /var/lib/bandwidth /sys/class/net /root/.docker /etc/bandwidth
+ReadOnlyPaths=/usr/local/bin
 
-# Capabilities needed for tc (net admin) and Docker socket
-AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_SYS_ADMIN
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_SYS_ADMIN
+# Environment
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=GOTOOLCHAIN=local
+Environment=CGO_ENABLED=0
 
-# Resource limits
+# Limits
 LimitNOFILE=65536
 LimitNPROC=4096
-MemoryMax=512M
-CPUQuota=200%
 
-# Logging
+# System
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=bandwidthd
+SyslogIdentifier=bandwidth
+
+# Kill signal handling
+KillMode=mixed
+KillSignal=SIGTERM
+SendSIGKILL=yes
 
 [Install]
 WantedBy=multi-user.target

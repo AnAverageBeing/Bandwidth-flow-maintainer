@@ -40,7 +40,6 @@ type Stats struct {
 	Sent    int64
 	Failed  int64
 	Retried int64
-	mu      sync.Mutex
 }
 
 type webhookTask struct {
@@ -135,9 +134,14 @@ func (m *Manager) Send(eventType models.EventType, containerName, message, sever
 
 // Stats returns the current webhook delivery statistics.
 func (m *Manager) Stats() Stats {
-	m.stats.mu.Lock()
-	defer m.stats.mu.Unlock()
-	return m.stats
+	m.mu.RLock()
+	s := Stats{
+		Sent:    m.stats.Sent,
+		Failed:  m.stats.Failed,
+		Retried: m.stats.Retried,
+	}
+	m.mu.RUnlock()
+	return s
 }
 
 // Stop gracefully shuts down the webhook manager.
@@ -197,9 +201,9 @@ func (m *Manager) deliver(task *webhookTask) {
 		resp.Body.Close()
 
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			m.stats.mu.Lock()
+			m.mu.Lock()
 			m.stats.Sent++
-			m.stats.mu.Unlock()
+			m.mu.Unlock()
 			m.log.Debug("webhook: delivered to %s (HTTP %d)", task.Endpoint.Name, resp.StatusCode)
 			return
 		}
@@ -210,9 +214,9 @@ func (m *Manager) deliver(task *webhookTask) {
 		}
 	}
 
-	m.stats.mu.Lock()
+	m.mu.Lock()
 	m.stats.Failed++
-	m.stats.mu.Unlock()
+	m.mu.Unlock()
 	m.log.Error("webhook: failed to deliver to %s after %d attempts", task.Endpoint.Name, task.MaxTries)
 }
 
