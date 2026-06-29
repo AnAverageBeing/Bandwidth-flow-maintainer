@@ -70,16 +70,33 @@ func (m *Manager) ApplyLimit(container *models.Container) error {
 		return fmt.Errorf("tc: no veth interface for container %s", container.Name)
 	}
 
+	// Guard against zero/negative rates — tc requires positive rates
+	rxMbps := container.LimitRxMbps
+	txMbps := container.LimitTxMbps
+	ceilMbps := container.CeilRxMbps
+	if rxMbps <= 0 {
+		rxMbps = 1 // minimum 1 Mbps so tc doesn't reject
+	}
+	if txMbps <= 0 {
+		txMbps = 1
+	}
+	if ceilMbps <= 0 {
+		ceilMbps = rxMbps * 2
+	}
+	if ceilMbps < rxMbps {
+		ceilMbps = rxMbps
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	rule := &Rule{
 		ContainerID: container.ID,
 		Interface:   container.VethInterface,
-		RxMbps:      container.LimitRxMbps,
-		TxMbps:      container.LimitTxMbps,
-		CeilMbps:    container.CeilRxMbps,
-		BurstMbps:   container.CeilRxMbps, // burst = ceil for token bucket
+		RxMbps:      rxMbps,
+		TxMbps:      txMbps,
+		CeilMbps:    ceilMbps,
+		BurstMbps:   ceilMbps, // burst = ceil for token bucket
 	}
 
 	// Check if we need to handle exceeded state

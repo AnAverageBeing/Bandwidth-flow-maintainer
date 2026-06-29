@@ -303,9 +303,10 @@ fi
 # Systemd service or fallback
 if $HAS_SYSTEMD; then
     if [ -f "$REPO_DIR/systemd/bandwidth.service" ]; then
-        cp "$REPO_DIR/systemd/bandwidth.service" /etc/systemd/system/bandwidth.service
-        # Fix ReadWritePaths
-        sed -i 's|ReadWritePaths=/var/run /var/log/bandwidth /var/lib/bandwidth /sys/class/net /root/.docker|ReadWritePaths=/var/run /var/log/bandwidth /var/lib/bandwidth /sys/class/net /root/.docker /etc/bandwidth|' /etc/systemd/system/bandwidth.service 2>/dev/null || true
+        # Create /root/.docker if it doesn't exist (needed for Docker config)
+        mkdir -p /root/.docker 2>/dev/null || true
+        # Always overwrite with fresh service file
+        cp -f "$REPO_DIR/systemd/bandwidth.service" /etc/systemd/system/bandwidth.service
         systemctl daemon-reload
         systemctl enable bandwidth 2>/dev/null || true
         ok "Systemd service: installed"
