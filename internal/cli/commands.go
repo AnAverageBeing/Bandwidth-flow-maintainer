@@ -109,7 +109,15 @@ func (c *CLI) Configure() {
 	fmt.Println("Configure each setting. Press Enter to keep [current value].")
 	fmt.Println()
 
-	reader := bufio.NewReader(os.Stdin)
+	// Use /dev/tty for real terminal input (works even when piped from curl)
+	tty, err := os.Open("/dev/tty")
+	if err != nil {
+		// Fallback to stdin if /dev/tty unavailable (e.g., in containers)
+		tty = os.Stdin
+	} else {
+		defer tty.Close()
+	}
+	reader := bufio.NewReader(tty)
 	configPath := "/etc/bandwidth/config.yaml"
 
 	// Load existing config

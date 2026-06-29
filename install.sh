@@ -482,7 +482,11 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 # ─── Interactive Setup ───────────────────────────────────────────────────────
 if [ $FAIL -eq 0 ] || [ $DAEMON_STARTED = true ]; then
     echo ""
-    read -rp "Configure settings now? [Y/n]: " do_config
+    # Use /dev/tty for real terminal input (works even when piped from curl)
+    if [ -c /dev/tty ]; then
+        exec < /dev/tty
+    fi
+    read -rp "Configure settings now? [Y/n]: " do_config < /dev/tty 2>/dev/null || do_config="y"
     do_config=${do_config:-y}
     if [ "$do_config" = "y" ] || [ "$do_config" = "Y" ]; then
         "$BW" configure 2>/dev/null || warn "Interactive configure unavailable"

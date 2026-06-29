@@ -14,23 +14,15 @@ RestartSec=5
 TimeoutStartSec=30
 TimeoutStopSec=15
 
-# Security hardening
-NoNewPrivileges=no
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/var/run /var/log/bandwidth /var/lib/bandwidth /sys/class/net /root/.docker /etc/bandwidth
-ReadOnlyPaths=/usr/local/bin
-
 # Environment
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=GOTOOLCHAIN=local
-Environment=CGO_ENABLED=0
 
 # Limits
 LimitNOFILE=65536
 LimitNPROC=4096
 
-# System
+# Logging
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=bandwidth
