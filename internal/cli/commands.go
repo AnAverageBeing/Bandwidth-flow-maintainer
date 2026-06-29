@@ -89,9 +89,52 @@ func (c *CLI) Help() {
 	fmt.Println("  webhook test       Test webhook configuration")
 	fmt.Println("  export             Export historical data")
 	fmt.Println("  cleanup            Run cleanup")
+	fmt.Println("  completion <sh>   Generate shell completion (bash/zsh/fish)")
 	fmt.Println("  help               Show this help")
 	fmt.Println()
 	fmt.Println("GitHub: github.com/AnAverageBeing/Bandwidth-flow-maintainer")
+}
+
+// Completion generates shell completion scripts for bash, zsh, or fish.
+func (c *CLI) Completion(shell string) {
+	commands := []string{
+		"setup", "configure", "reapply", "reload", "status", "doctor",
+		"inspect", "inspect-port", "reset", "enable", "disable",
+		"restart", "stop", "start", "logs", "config", "list",
+		"version", "health", "webhook", "export", "history",
+		"cleanup", "stats", "limits", "top", "daemon", "help", "completion",
+	}
+
+	switch shell {
+	case "bash":
+		fmt.Println("# bandwidth bash completion — add to ~/.bashrc or /etc/bash_completion.d/bandwidth")
+		fmt.Println("_bandwidth() {")
+		fmt.Println("  local cur=${COMP_WORDS[COMP_CWORD]}")
+		fmt.Println("  local cmds='" + strings.Join(commands, " ") + "'")
+		fmt.Println("  if [[ $COMP_CWORD -eq 1 ]]; then")
+		fmt.Println("    COMPREPLY=($(compgen -W \"$cmds\" -- \"$cur\"))")
+		fmt.Println("  fi")
+		fmt.Println("}")
+		fmt.Println("complete -F _bandwidth bandwidth")
+
+	case "zsh":
+		fmt.Println("#compdef bandwidth")
+		fmt.Println("_bandwidth() {")
+		fmt.Println("  local -a commands")
+		fmt.Printf("  commands=(%s)\n", strings.Join(commands, " "))
+		fmt.Println("  _describe 'command' commands")
+		fmt.Println("}")
+		fmt.Println("_bandwidth")
+
+	case "fish":
+		fmt.Println("# bandwidth fish completion — save to ~/.config/fish/completions/bandwidth.fish")
+		for _, cmd := range commands {
+			fmt.Printf("complete -c bandwidth -n '__fish_use_subcommand' -a %s -d '%s bandwidth manager'\n", cmd, cmd)
+		}
+
+	default:
+		fmt.Printf("Unknown shell: %s. Use: bash, zsh, or fish\n", shell)
+	}
 }
 
 // Setup runs the interactive configuration wizard.

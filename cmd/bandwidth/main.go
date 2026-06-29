@@ -97,6 +97,12 @@ func main() {
 		c.Top()
 	case "daemon":
 		c.Daemon()
+	case "completion":
+		shell := "bash"
+		if len(args) > 0 {
+			shell = args[0]
+		}
+		c.Completion(shell)
 	case "help", "-h", "--help":
 		c.Help()
 	default:

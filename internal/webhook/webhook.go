@@ -233,29 +233,82 @@ func (m *Manager) formatPayload(webhookType string, p models.WebhookPayload) ([]
 }
 
 func (m *Manager) discordPayload(p models.WebhookPayload) ([]byte, error) {
-	color := 0x00FF00 // green default
+	// Color mapping: green=info, orange=warning, red=error, purple=reset/startup
+	color := 0x7C3AED // purple accent (brand)
 	switch p.Severity {
+	case "info":
+		color = 0x3FB950 // green
 	case "warning":
-		color = 0xFFA500
+		color = 0xD29922 // orange
 	case "error", "critical":
-		color = 0xFF0000
+		color = 0xF85149 // red
+	}
+
+	// Event-specific emoji
+	emoji := "📡"
+	switch p.Event {
+	case "daemon_started":
+		emoji, color = "🟢", 0x3FB950
+	case "daemon_stopped":
+		emoji, color = "🔴", 0xF85149
+	case "container_found":
+		emoji = "🐳"
+	case "container_removed":
+		emoji = "🗑️"
+	case "quota_warning":
+		emoji, color = "⚠️", 0xD29922
+	case "quota_exceeded":
+		emoji, color = "🚫", 0xF85149
+	case "reset":
+		emoji, color = "🔄", 0x7C3AED
+	case "cleanup":
+		emoji = "🧹"
+	case "error", "tc_failed", "docker_error":
+		emoji, color = "❌", 0xF85149
+	case "config_updated":
+		emoji, color = "📝", 0x58A6FF
+	}
+
+	title := fmt.Sprintf("%s %s", emoji, p.Event)
+	if p.Severity == "error" || p.Severity == "critical" {
+		title = fmt.Sprintf("%s **%s**", emoji, p.Event)
 	}
 
 	embed := map[string]interface{}{
 		"embeds": []map[string]interface{}{
 			{
-				"title":       fmt.Sprintf("[%s] %s", p.Event, p.Severity),
+				"title":       title,
 				"description": p.Message,
 				"color":       color,
 				"timestamp":   p.Timestamp.Format(time.RFC3339),
+				"footer": map[string]string{
+					"text": "Bandwidth Manager by AnAverageBeing",
+				},
 				"fields": []map[string]interface{}{
-					{"name": "Container", "value": p.Container, "inline": true},
-					{"name": "Event", "value": string(p.Event), "inline": true},
+					{"name": "Severity", "value": fmt.Sprintf("`%s`", p.Severity), "inline": true},
+					{"name": "Container", "value": orNA(p.Container), "inline": true},
+					{"name": "Time", "value": fmt.Sprintf("<t:%d:R>", p.Timestamp.Unix()), "inline": true},
 				},
 			},
 		},
 	}
+
+	// Add metadata as extra field if present
+	if p.Metadata != "" {
+		embed["embeds"].([]map[string]interface{})[0]["fields"] = append(
+			embed["embeds"].([]map[string]interface{})[0]["fields"].([]map[string]interface{}),
+			map[string]interface{}{"name": "Details", "value": fmt.Sprintf("```%s```", p.Metadata), "inline": false},
+		)
+	}
+
 	return json.Marshal(embed)
+}
+
+func orNA(s string) string {
+	if s == "" {
+		return "N/A"
+	}
+	return s
 }
 
 func (m *Manager) slackPayload(p models.WebhookPayload) ([]byte, error) {
