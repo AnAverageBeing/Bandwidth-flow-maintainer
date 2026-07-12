@@ -224,20 +224,18 @@ func (m *Manager) applyRule(rule *Rule) error {
 		burstKbit = 16 // minimum burst for tc
 	}
 
-	// Remove existing qdisc
+	// Remove existing qdiscs
 	_ = exec.Command("tc", "qdisc", "del", "dev", iface, "root").Run()
+	_ = exec.Command("tc", "qdisc", "del", "dev", iface, "ingress").Run()
 
-	// Add root HTB qdisc
+	// Egress shaping (container upload / TX) via HTB on the veth.
 	cmds := [][]string{
 		{"tc", "qdisc", "add", "dev", iface, "root", "handle", "1:", "htb", "default", "1"},
 		{"tc", "class", "add", "dev", iface, "parent", "1:", "classid", "1:1", "htb",
-			"rate", fmt.Sprintf("%dkbit", rxKbit),
+			"rate", fmt.Sprintf("%dkbit", txKbit),
 			"ceil", fmt.Sprintf("%dkbit", ceilKbit),
 			"burst", fmt.Sprintf("%dkbit", burstKbit)},
 	}
-
-	// For egress shaping, we add a filter that directs all traffic to class 1:1
-	// For ingress, we use an ingress qdisc + police filter
 	for _, cmd := range cmds {
 		c := exec.Command(cmd[0], cmd[1:]...)
 		if out, err := c.CombinedOutput(); err != nil {
@@ -245,35 +243,30 @@ func (m *Manager) applyRule(rule *Rule) error {
 		}
 	}
 
-	// Ingress policing (RX limit)
+	// Catch-all egress filter for IPv4 + IPv6.
+	_ = exec.Command("tc", "filter", "del", "dev", iface, "parent", "1:", "prio", "1").Run()
+	_ = exec.Command("tc", "filter", "add", "dev", iface, "parent", "1:", "protocol", "ip",
+		"prio", "1", "u32", "match", "ip", "dst", "0.0.0.0/0", "flowid", "1:1").Run()
+	_ = exec.Command("tc", "filter", "add", "dev", iface, "parent", "1:", "protocol", "ipv6",
+		"prio", "2", "u32", "match", "ip6", "dst", "::/0", "flowid", "1:1").Run()
+
+	// Ingress policing (container download / RX) via ingress qdisc.
 	if rxKbit > 0 {
-		_ = exec.Command("tc", "qdisc", "del", "dev", iface, "ingress").Run()
 		ingressCmd := exec.Command("tc", "qdisc", "add", "dev", iface, "handle", "ffff:", "ingress")
 		if out, err := ingressCmd.CombinedOutput(); err != nil {
 			m.log.Warn("tc: ingress qdisc failed on %s: %s", iface, strings.TrimSpace(string(out)))
 		}
 
-		// Police incoming traffic
-		policeCmd := exec.Command("tc", "filter", "add", "dev", iface, "parent", "ffff:", "protocol", "ip",
-			"prio", "50", "basic", "police",
+		// Catch-all ingress police for IPv4 + IPv6.
+		policeCmd := exec.Command("tc", "filter", "add", "dev", iface, "parent", "ffff:", "protocol", "all",
+			"prio", "50", "u32", "match", "u32", "0", "0", "police",
 			"rate", fmt.Sprintf("%dkbit", rxKbit),
 			"burst", fmt.Sprintf("%dkbit", burstKbit),
-			"drop", "flowid", ":1")
+			"drop")
 		if out, err := policeCmd.CombinedOutput(); err != nil {
 			m.log.Warn("tc: ingress police failed on %s: %s", iface, strings.TrimSpace(string(out)))
 		}
 	}
-
-	// Apply egress filter
-	_ = exec.Command("tc", "filter", "del", "dev", iface, "parent", "1:", "prio", "1").Run()
-	filterCmd := exec.Command("tc", "filter", "add", "dev", iface, "parent", "1:", "protocol", "ip",
-		"prio", "1", "u32", "match", "ip", "dst", "0.0.0.0/0", "flowid", "1:1")
-	if out, err := filterCmd.CombinedOutput(); err != nil {
-		m.log.Warn("tc: filter failed on %s: %s", iface, strings.TrimSpace(string(out)))
-	}
-
-	// Also set TX rate via ifb mirror (for ingress shaping accuracy)
-	_ = m.setupIFB(iface, txKbit, ceilKbit)
 
 	rule.Active = true
 	rule.QdiscHandle = "1:"
@@ -302,24 +295,6 @@ func (m *Manager) verifyRule(iface string) bool {
 		return false
 	}
 	return strings.Contains(string(out), "htb") || strings.Contains(string(out), "ingress")
-}
-
-// setupIFB sets up an Intermediate Functional Block device for more accurate
-// ingress shaping (the IFB receives mirrored ingress traffic and applies egress shaping).
-func (m *Manager) setupIFB(iface string, txKbit, ceilKbit uint64) error {
-	// Check if ifb0 exists
-	if out, err := exec.Command("ip", "link", "show", "ifb0").CombinedOutput(); err != nil {
-		_ = exec.Command("ip", "link", "add", "ifb0", "type", "ifb").Run()
-		_ = exec.Command("ip", "link", "set", "ifb0", "up").Run()
-		_ = out
-	}
-
-	// Redirect ingress from veth to ifb0
-	mirrorCmd := exec.Command("tc", "filter", "add", "dev", iface, "parent", "ffff:", "protocol", "ip",
-		"prio", "1", "u32", "match", "u32", "0", "0", "action", "mirred", "egress", "redirect", "dev", "ifb0")
-	mirrorCmd.Run() // non-fatal
-
-	return nil
 }
 
 // ─── Utility ──────────────────────────────────────────────────────────────────

@@ -146,7 +146,16 @@ func (m *Manager) Stats() Stats {
 
 // Stop gracefully shuts down the webhook manager.
 func (m *Manager) Stop() {
-	close(m.stopCh)
+	m.mu.Lock()
+	select {
+	case <-m.stopCh:
+		m.mu.Unlock()
+		return
+	default:
+		close(m.stopCh)
+	}
+	m.mu.Unlock()
+
 	m.wg.Wait()
 	close(m.queue)
 }

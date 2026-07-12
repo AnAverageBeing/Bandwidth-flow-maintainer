@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -409,20 +410,79 @@ func dockerStateToModel(status string) models.ContainerState {
 }
 
 func detectVeth(pid int, containerID string) string {
-	if pid <= 0 {
+	if pid <= 0 || containerID == "" {
 		return ""
 	}
 
+	// Prefer accurate peer-ifindex matching via the container namespace.
+	if peerIdx, err := vethPeerIfindex(containerID); err == nil && peerIdx > 0 {
+		if iface := findHostVethByIfindex(peerIdx); iface != "" {
+			return iface
+		}
+	}
+
+	// Fallback: return the first host veth (legacy behavior).
+	return firstHostVeth()
+}
+
+// vethPeerIfindex returns the host-side ifindex of the veth peer for the
+// container's primary interface (eth0). This is the most reliable way to map
+// a container to its host veth without entering namespaces.
+func vethPeerIfindex(containerID string) (int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "docker", "exec", containerID, "cat", "/sys/class/net/eth0/iflink")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("read peer iflink: %w", err)
+	}
+
+	idx, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0, fmt.Errorf("parse peer iflink: %w", err)
+	}
+	return idx, nil
+}
+
+// findHostVethByIfindex scans host interfaces and returns the veth whose
+// ifindex matches the supplied peer ifindex.
+func findHostVethByIfindex(target int) string {
 	entries, err := os.ReadDir("/sys/class/net")
 	if err != nil {
 		return ""
 	}
 
 	for _, entry := range entries {
-		if !strings.HasPrefix(entry.Name(), "veth") {
+		name := entry.Name()
+		if !strings.HasPrefix(name, "veth") {
 			continue
 		}
-		return entry.Name()
+		data, err := os.ReadFile(filepath.Join("/sys/class/net", name, "ifindex"))
+		if err != nil {
+			continue
+		}
+		idx, err := strconv.Atoi(strings.TrimSpace(string(data)))
+		if err != nil {
+			continue
+		}
+		if idx == target {
+			return name
+		}
+	}
+	return ""
+}
+
+// firstHostVeth returns the first veth interface on the host as a last resort.
+func firstHostVeth() string {
+	entries, err := os.ReadDir("/sys/class/net")
+	if err != nil {
+		return ""
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "veth") {
+			return entry.Name()
+		}
 	}
 	return ""
 }

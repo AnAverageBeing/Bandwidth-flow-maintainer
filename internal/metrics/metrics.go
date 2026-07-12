@@ -94,20 +94,20 @@ func (e *Exporter) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "# HELP bandwidth_current_rx_mbps Current RX Mbps per container\n")
 	fmt.Fprintf(w, "# TYPE bandwidth_current_rx_mbps gauge\n")
 	for _, c := range containers {
-		fmt.Fprintf(w, `bandwidth_current_rx_mbps{container="%s",name="%s"} %.2f`+"\n", c.ID[:12], c.Name, c.CurrentRxMbps)
+		fmt.Fprintf(w, `bandwidth_current_rx_mbps{container="%s",name="%s"} %.2f`+"\n", shortID(c.ID), c.Name, c.CurrentRxMbps)
 	}
 
 	fmt.Fprintf(w, "\n# HELP bandwidth_current_tx_mbps Current TX Mbps per container\n")
 	fmt.Fprintf(w, "# TYPE bandwidth_current_tx_mbps gauge\n")
 	for _, c := range containers {
-		fmt.Fprintf(w, `bandwidth_current_tx_mbps{container="%s",name="%s"} %.2f`+"\n", c.ID[:12], c.Name, c.CurrentTxMbps)
+		fmt.Fprintf(w, `bandwidth_current_tx_mbps{container="%s",name="%s"} %.2f`+"\n", shortID(c.ID), c.Name, c.CurrentTxMbps)
 	}
 
 	fmt.Fprintf(w, "\n# HELP bandwidth_today_usage_gb Today's usage in GB\n")
 	fmt.Fprintf(w, "# TYPE bandwidth_today_usage_gb gauge\n")
 	for _, c := range containers {
-		fmt.Fprintf(w, `bandwidth_today_usage_gb{container="%s",name="%s",direction="rx"} %.4f`+"\n", c.ID[:12], c.Name, c.TodayRxGB)
-		fmt.Fprintf(w, `bandwidth_today_usage_gb{container="%s",name="%s",direction="tx"} %.4f`+"\n", c.ID[:12], c.Name, c.TodayTxGB)
+		fmt.Fprintf(w, `bandwidth_today_usage_gb{container="%s",name="%s",direction="rx"} %.4f`+"\n", shortID(c.ID), c.Name, c.TodayRxGB)
+		fmt.Fprintf(w, `bandwidth_today_usage_gb{container="%s",name="%s",direction="tx"} %.4f`+"\n", shortID(c.ID), c.Name, c.TodayTxGB)
 	}
 
 	// Webhook metrics
@@ -118,4 +118,11 @@ func (e *Exporter) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "# HELP bandwidth_webhooks_failed_total Total webhook failures\n")
 	fmt.Fprintf(w, "# TYPE bandwidth_webhooks_failed_total counter\n")
 	fmt.Fprintf(w, "bandwidth_webhooks_failed_total %d\n", whStats.Failed)
+}
+
+func shortID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
 }

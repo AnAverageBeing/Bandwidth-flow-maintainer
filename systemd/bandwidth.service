@@ -2,30 +2,59 @@
 Description=Bandwidth Manager Daemon
 Documentation=https://github.com/AnAverageBeing/Bandwidth-flow-maintainer
 After=network.target docker.service
-Wants=network.target docker.service
+Requires=docker.service
+Wants=network.target
 
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/local/bin/bandwidthd --config /etc/bandwidth/config.yaml
-ExecReload=/bin/kill -HUP $MAINPID
-Restart=always
-RestartSec=5
-TimeoutStartSec=30
-TimeoutStopSec=15
-
-# Environment
+Environment=DOCKER_CONFIG=/root/.docker
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=GOTOOLCHAIN=local
 
-# Limits
+ExecStartPre=/bin/mkdir -p /root/.docker
+ExecStartPre=/bin/sh -c 'echo "{}" > /root/.docker/config.json'
+ExecStart=/usr/local/bin/bandwidthd --config /etc/bandwidth/config.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+ExecStop=/bin/kill -SIGTERM $MAINPID
+
+Restart=always
+RestartSec=10
+StartLimitInterval=60
+StartLimitBurst=5
+TimeoutStartSec=30
+TimeoutStopSec=15
+
+# Security hardening
+NoNewPrivileges=no
+ProtectSystem=full
+ProtectHome=no
+ReadWritePaths=/var/run /var/log/bandwidth /var/lib/bandwidth /sys/class/net /root/.docker /etc/bandwidth
+ReadOnlyPaths=/etc/bandwidth
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+
+# Capabilities required for traffic control and network namespace access
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_SYS_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_SYS_ADMIN
+
+# Resource limits
 LimitNOFILE=65536
 LimitNPROC=4096
+MemoryMax=512M
+CPUQuota=200%
 
 # Logging
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=bandwidth
+SyslogIdentifier=bandwidthd
 
 # Kill signal handling
 KillMode=mixed

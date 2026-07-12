@@ -19,6 +19,7 @@ type Manager struct {
 	interval   time.Duration
 	staleHours int
 	compact    bool
+	enabled    bool
 }
 
 // Config holds cleanup settings.
@@ -40,26 +41,38 @@ func NewManager(cfg Config, log *logger.Logger, db *database.DB, tcMgr *tc.Manag
 		interval:   cfg.Interval,
 		staleHours: cfg.StaleContainerHours,
 		compact:    cfg.CompactDB,
+		enabled:    cfg.Enabled,
 	}
 }
 
 // Run executes a full cleanup cycle.
 func (m *Manager) Run(ctx context.Context) error {
-	m.log.Info("cleanup: starting cycle")
-
-	// 1. Remove stale containers from DB
-	staleAge := time.Duration(m.staleHours) * time.Hour
-	if removed, err := m.db.CleanupStaleContainers(staleAge); err != nil {
-		m.log.Error("cleanup: stale containers: %v", err)
-	} else if removed > 0 {
-		m.log.Info("cleanup: removed %d stale container records", removed)
+	if !m.enabled {
+		m.log.Debug("cleanup: disabled — skipping cycle")
+		return nil
 	}
 
-	// 2. Clean up old usage records (> 30 days)
-	if removed, err := m.db.CleanupOldUsage(30 * 24 * time.Hour); err != nil {
-		m.log.Error("cleanup: old usage: %v", err)
-	} else if removed > 0 {
-		m.log.Info("cleanup: removed %d old usage records", removed)
+	m.log.Info("cleanup: starting cycle")
+
+	// 1. Remove stale containers from DB (skip if staleHours <= 0)
+	if m.staleHours > 0 {
+		staleAge := time.Duration(m.staleHours) * time.Hour
+		if removed, err := m.db.CleanupStaleContainers(staleAge); err != nil {
+			m.log.Error("cleanup: stale containers: %v", err)
+		} else if removed > 0 {
+			m.log.Info("cleanup: removed %d stale container records", removed)
+		}
+	} else {
+		m.log.Debug("cleanup: stale container deletion disabled (stale_container_hours <= 0)")
+	}
+
+	// 2. Clean up old usage records (> 30 days) — only if stale cleanup is enabled
+	if m.staleHours > 0 {
+		if removed, err := m.db.CleanupOldUsage(30 * 24 * time.Hour); err != nil {
+			m.log.Error("cleanup: old usage: %v", err)
+		} else if removed > 0 {
+			m.log.Info("cleanup: removed %d old usage records", removed)
+		}
 	}
 
 	// 3. Repair tc rules (remove rules for containers that no longer exist)

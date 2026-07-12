@@ -320,9 +320,14 @@ func (d *Daemon) Start(ctx context.Context) error {
 		return nil
 	})
 
-	d.sched.AddJob("cleanup", d.cfg.Cleanup.Interval, func(ctx context.Context) error {
-		return d.cleanup.Run(ctx)
-	})
+	if d.cfg.Cleanup.Enabled {
+		d.sched.AddJob("cleanup", d.cfg.Cleanup.Interval, func(ctx context.Context) error {
+			return d.cleanup.Run(ctx)
+		})
+		d.log.Info("daemon: cleanup scheduled every %s", d.cfg.Cleanup.Interval)
+	} else {
+		d.log.Info("daemon: cleanup disabled")
+	}
 
 	d.sched.AddJob("health-check", 5*time.Minute, func(ctx context.Context) error {
 		report := d.health.Run()
@@ -419,9 +424,10 @@ func (d *Daemon) Stop() {
 
 	d.whMgr.Send(models.EventDaemonStopped, "", "Bandwidth manager daemon stopping", "info")
 
-	// Stop socket listener
+	// Stop socket listener and remove stale socket
 	if d.socketLn != nil {
 		d.socketLn.Close()
+		os.Remove(d.cfg.General.SocketPath)
 	}
 
 	// Stop scheduler

@@ -179,3 +179,47 @@ func TestGetMissingConfig(t *testing.T) {
 		t.Errorf("expected empty for missing key, got %s", val)
 	}
 }
+
+func TestUpsertContainerPreservesPortsAndLabels(t *testing.T) {
+	db, _ := testDB(t, "json-fields")
+
+	c := &models.Container{
+		ID:            "json-test",
+		Name:          "json-test",
+		State:         models.StateRunning,
+		Labels:        map[string]string{"bandwidth.speed": "250"},
+		Ports:         []models.PortMapping{{ContainerPort: 80, HostPort: 8080, Protocol: "tcp"}},
+		Priority:      "premium",
+		Webhook:       true,
+		History:       false,
+		VethInterface: "vethJson0",
+	}
+
+	if err := db.UpsertContainer(c); err != nil {
+		t.Fatalf("UpsertContainer: %v", err)
+	}
+
+	got, err := db.GetContainer("json-test")
+	if err != nil {
+		t.Fatalf("GetContainer: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected container, got nil")
+	}
+
+	if len(got.Labels) != 1 || got.Labels["bandwidth.speed"] != "250" {
+		t.Errorf("labels not preserved: %v", got.Labels)
+	}
+	if len(got.Ports) != 1 || got.Ports[0].HostPort != 8080 {
+		t.Errorf("ports not preserved: %v", got.Ports)
+	}
+	if got.Priority != "premium" {
+		t.Errorf("expected priority premium, got %s", got.Priority)
+	}
+	if !got.Webhook {
+		t.Error("expected webhook=true")
+	}
+	if got.History {
+		t.Error("expected history=false")
+	}
+}

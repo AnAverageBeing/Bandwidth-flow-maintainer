@@ -107,10 +107,12 @@ func (s *Server) Start(ctx context.Context) error {
 		return fmt.Errorf("api: no listeners available")
 	}
 
+	// Single server shared across all listeners so Stop() shuts everything down.
+	s.httpSrv = &http.Server{Handler: handler}
+
 	// Serve on all listeners
 	for _, ln := range listeners {
 		go func(l net.Listener) {
-			s.httpSrv = &http.Server{Handler: handler}
 			if err := s.httpSrv.Serve(l); err != nil && err != http.ErrServerClosed {
 				s.log.Error("api: serve: %v", err)
 			}
@@ -177,7 +179,11 @@ func (s *Server) handleContainer(w http.ResponseWriter, r *http.Request) {
 
 	// Find container
 	for _, c := range s.discovery.ListContainers() {
-		if c.ID == id || c.ID[:12] == id || c.Name == id {
+		shortID := c.ID
+		if len(shortID) > 12 {
+			shortID = shortID[:12]
+		}
+		if c.ID == id || shortID == id || c.Name == id {
 			writeJSON(w, c)
 			return
 		}
@@ -226,6 +232,5 @@ func writeJSON(w http.ResponseWriter, data interface{}) {
 
 func removeSocket(path string) error {
 	// Best effort — the socket may not exist
-	_ = net.UnixAddr{Name: path, Net: "unix"}
-	return nil
+	return os.Remove(path)
 }

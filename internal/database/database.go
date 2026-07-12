@@ -4,6 +4,7 @@ package database
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -242,12 +243,12 @@ func (db *DB) UpsertContainer(c *models.Container) error {
 			restart_policy=excluded.restart_policy, last_seen=excluded.last_seen,
 			limit_rx_mbps=excluded.limit_rx_mbps, limit_tx_mbps=excluded.limit_tx_mbps,
 			ceil_rx_mbps=excluded.ceil_rx_mbps, ceil_tx_mbps=excluded.ceil_tx_mbps,
-			daily_quota_gb=excluded.daily_quota_gb, exceeded_speed_rx=excluded.exceeded_speed_rx,
-			exceeded_speed_tx=excluded.exceeded_speed_tx,
+			daily_quota_gb=excluded.daily_quota_gb, warning_percent=excluded.warning_percent,
+			exceeded_speed_rx=excluded.exceeded_speed_rx, exceeded_speed_tx=excluded.exceeded_speed_tx,
 			rx_bytes=excluded.rx_bytes, tx_bytes=excluded.tx_bytes,
 			current_rx_mbps=excluded.current_rx_mbps, current_tx_mbps=excluded.current_tx_mbps,
 			today_rx_gb=excluded.today_rx_gb, today_tx_gb=excluded.today_tx_gb,
-			enabled=excluded.enabled`,
+			priority=excluded.priority, enabled=excluded.enabled, webhook=excluded.webhook, history=excluded.history`,
 		c.ID, c.Name, c.PID, string(c.State), c.VethInterface, c.NetworkName, c.IPAddress,
 		toJSON(c.Ports), toJSON(c.Labels), c.RestartPolicy,
 		c.FirstSeen.Format(time.RFC3339), c.LastSeen.Format(time.RFC3339),
@@ -454,7 +455,12 @@ func (db *DB) GetRecentEvents(limit int) ([]*models.Event, error) {
 // ─── Cleanup ──────────────────────────────────────────────────────────────────
 
 // CleanupStaleContainers removes containers not seen within the given duration.
+// If maxAge <= 0, this is a no-op (safety guard against accidental full deletion).
 func (db *DB) CleanupStaleContainers(maxAge time.Duration) (int64, error) {
+	if maxAge <= 0 {
+		return 0, nil // safety: never delete everything
+	}
+
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
@@ -590,20 +596,35 @@ func scanContainers(rows *sql.Rows) ([]*models.Container, error) {
 	return containers, rows.Err()
 }
 
-// Minimal JSON helpers (avoid importing encoding/json at every call site)
+// JSON helpers for storing structured fields in SQLite.
 func toJSON(v interface{}) string {
-	// In production we'd use encoding/json — these stubs are intentional
-	// for the package-level interface. Actual JSON serialization is done
-	// through the internal/jsonutil package.
-	return fmt.Sprintf("%v", v)
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
 }
 
 func fromJSONPorts(s string) []models.PortMapping {
-	return nil // populated by jsonutil in production
+	if s == "" {
+		return nil
+	}
+	var ports []models.PortMapping
+	if err := json.Unmarshal([]byte(s), &ports); err != nil {
+		return nil
+	}
+	return ports
 }
 
 func fromJSONMap(s string) map[string]string {
-	return nil // populated by jsonutil in production
+	if s == "" {
+		return nil
+	}
+	var m map[string]string
+	if err := json.Unmarshal([]byte(s), &m); err != nil {
+		return nil
+	}
+	return m
 }
 
 func btoi(b bool) int {

@@ -23,12 +23,13 @@ type ScheduledJob struct {
 
 // Scheduler manages recurring jobs without external cron.
 type Scheduler struct {
-	log    *logger.Logger
-	mu     sync.RWMutex
-	jobs   map[string]*ScheduledJob
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	log            *logger.Logger
+	mu             sync.RWMutex
+	jobs           map[string]*ScheduledJob
+	ctx            context.Context
+	cancel         context.CancelFunc
+	wg             sync.WaitGroup
+	checkInterval  time.Duration
 }
 
 // Config holds scheduler parameters.
@@ -40,11 +41,16 @@ type Config struct {
 // New creates a new internal scheduler.
 func New(cfg Config, log *logger.Logger) *Scheduler {
 	ctx, cancel := context.WithCancel(context.Background())
+	interval := cfg.CheckInterval
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
 	return &Scheduler{
-		log:    log,
-		jobs:   make(map[string]*ScheduledJob),
-		ctx:    ctx,
-		cancel: cancel,
+		log:           log,
+		jobs:          make(map[string]*ScheduledJob),
+		ctx:           ctx,
+		cancel:        cancel,
+		checkInterval: interval,
 	}
 }
 
@@ -76,12 +82,12 @@ func (s *Scheduler) RunNow(name string) error {
 	return job.Fn(s.ctx)
 }
 
-// Start begins the scheduler loop. Checks jobs every 30 seconds.
+// Start begins the scheduler loop. Checks jobs every configured interval (default 30s).
 func (s *Scheduler) Start() {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(s.checkInterval)
 		defer ticker.Stop()
 
 		s.log.Info("scheduler: started")

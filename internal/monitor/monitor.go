@@ -68,14 +68,18 @@ func (m *Monitor) Collect(container *models.Container) error {
 
 	// Compute rates
 	var rxMbps, txMbps float64
+	var elapsed float64
 	if exists && prev.Timestamp.Before(now) {
-		elapsed := now.Sub(prev.Timestamp).Seconds()
+		elapsed = now.Sub(prev.Timestamp).Seconds()
 		if elapsed > 0 {
-			rxDiff := rxBytes - prev.RxBytes
-			txDiff := txBytes - prev.TxBytes
-			// bytes -> bits -> megabits / seconds = Mbps
-			rxMbps = float64(rxDiff*8) / elapsed / 1e6
-			txMbps = float64(txDiff*8) / elapsed / 1e6
+			// Counter reset (container restart) => treat as a fresh sample.
+			if rxBytes >= prev.RxBytes && txBytes >= prev.TxBytes {
+				rxDiff := rxBytes - prev.RxBytes
+				txDiff := txBytes - prev.TxBytes
+				// bytes -> bits -> megabits / seconds = Mbps
+				rxMbps = float64(rxDiff*8) / elapsed / 1e6
+				txMbps = float64(txDiff*8) / elapsed / 1e6
+			}
 		}
 	}
 
@@ -92,11 +96,11 @@ func (m *Monitor) Collect(container *models.Container) error {
 	container.CurrentRxMbps = rxMbps
 	container.CurrentTxMbps = txMbps
 
-	// Accumulate today's usage (approximate)
-	elapsedSinceLast := m.interval.Seconds()
-	if exists && elapsedSinceLast > 0 {
-		container.TodayRxGB += rxMbps * elapsedSinceLast / 8000
-		container.TodayTxGB += txMbps * elapsedSinceLast / 8000
+	// Accumulate today's usage using real elapsed time.
+	if exists && elapsed > 0 {
+		// Mbps * seconds / 8 = megabits / 8 = megabytes; / 1000 = GB.
+		container.TodayRxGB += rxMbps * elapsed / 8000
+		container.TodayTxGB += txMbps * elapsed / 8000
 	}
 
 	return nil

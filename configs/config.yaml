@@ -118,9 +118,9 @@ history:
 cleanup:
   enabled: true
   interval: 1h
-  stale_container_hours: 72     # Remove containers unseen for 3 days
-  remove_tc_rules: true          # Also remove tc rules
-  compact_db: true               # VACUUM SQLite
+  stale_container_hours: 72     # Remove containers unseen for N hours (0 = never delete)
+  remove_tc_rules: true          # Also remove orphaned tc rules
+  compact_db: true               # VACUUM SQLite to reclaim space
 
 # ---------------------------------------------------------------------------
 # Metrics: Prometheus metrics endpoint

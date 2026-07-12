@@ -486,9 +486,10 @@ echo " Logs:     $LOG_DIR/bandwidth.log"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # ─── Interactive Setup ───────────────────────────────────────────────────────
-# Only offer interactive config if we have a real terminal
-if [ $FAIL -eq 0 ] || [ $DAEMON_STARTED = true ]; then
-    if [ -t 0 ] && [ -c /dev/tty ]; then
+# Offer interactive config whenever we can read from the controlling terminal.
+# This works even when the installer is piped from curl because we read /dev/tty.
+if [ $FAIL -eq 0 ] || [ "$DAEMON_STARTED" = "true" ]; then
+    if [ -c /dev/tty ]; then
         echo ""
         read -rp "Configure settings now? [Y/n]: " do_config < /dev/tty 2>/dev/null || do_config=""
         do_config=${do_config:-y}

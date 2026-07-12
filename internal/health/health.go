@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/AnAverageBeing/Bandwidth-flow-maintainer/internal/database"
@@ -209,7 +210,7 @@ func (c *Checker) checkCPU() models.HealthCheck {
 	}
 }
 
-// ─── Syscall helpers (avoid importing x/sys/unix) ─────────────────────────────
+// ─── Syscall helpers ──────────────────────────────────────────────────────────
 
 type syscallStatfs struct {
 	Type   int64
@@ -221,12 +222,17 @@ type syscallStatfs struct {
 	Ffree  uint64
 }
 
-// statfs is a no-op placeholder — in production use unix.Statfs.
-// This avoids a hard dependency on golang.org/x/sys/unix in the health module.
 func statfs(path string, stat *syscallStatfs) error {
-	// Placeholder: in production, call unix.Statfs(path, stat)
-	// For now, return reasonable defaults so checks pass.
-	stat.Bavail = 1000000
-	stat.Bsize = 4096
+	var raw syscall.Statfs_t
+	if err := syscall.Statfs(path, &raw); err != nil {
+		return err
+	}
+	stat.Type = int64(raw.Type)
+	stat.Bsize = int64(raw.Bsize)
+	stat.Blocks = raw.Blocks
+	stat.Bfree = raw.Bfree
+	stat.Bavail = raw.Bavail
+	stat.Files = raw.Files
+	stat.Ffree = raw.Ffree
 	return nil
 }

@@ -414,8 +414,8 @@ func (c *Config) Validate() []error {
 	if c.TrafficControl.Enabled && c.TrafficControl.DefaultQdisc == "" {
 		errs = append(errs, fmt.Errorf("traffic_control.default_qdisc is required when tc is enabled"))
 	}
-	if c.Cleanup.StaleContainerHours < 1 {
-		errs = append(errs, fmt.Errorf("cleanup.stale_container_hours must be >= 1"))
+	if c.Cleanup.StaleContainerHours < 0 {
+		errs = append(errs, fmt.Errorf("cleanup.stale_container_hours must be >= 0 (0 = never delete)"))
 	}
 	if c.Scheduler.Enabled && c.Scheduler.ResetCron == "" {
 		errs = append(errs, fmt.Errorf("scheduler.reset_cron is required when scheduler is enabled"))

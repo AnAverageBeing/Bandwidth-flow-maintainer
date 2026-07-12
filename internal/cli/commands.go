@@ -177,19 +177,19 @@ func (c *CLI) Configure() {
 		defaultVal string
 	}
 	prompts := []prompt{
-		{"default_rx_mbps", "Default download speed (Mbps)", "100"},
-		{"default_tx_mbps", "Default upload speed (Mbps)", "100"},
-		{"default_ceil_mbps", "Max burst ceiling (Mbps)", "200"},
-		{"default_quota_gb", "Default daily quota (GB, 0=unlimited)", "500"},
-		{"exceeded_speed_rx_mbps", "Throttle download when quota exceeded (Mbps)", "1"},
-		{"exceeded_speed_tx_mbps", "Throttle upload when quota exceeded (Mbps)", "1"},
-		{"warning_percent", "Warning threshold (% of quota)", "90"},
-		{"poll_interval", "Poll interval (e.g. 5s, 10s)", "5s"},
-		{"discovery_interval", "Discovery scan interval", "10s"},
+		{"bandwidth.default_rx_mbps", "Default download speed (Mbps)", "100"},
+		{"bandwidth.default_tx_mbps", "Default upload speed (Mbps)", "100"},
+		{"bandwidth.default_ceil_mbps", "Max burst ceiling (Mbps)", "200"},
+		{"quota.default_quota_gb", "Default daily quota (GB, 0=unlimited)", "500"},
+		{"quota.exceeded_speed_rx_mbps", "Throttle download when quota exceeded (Mbps)", "1"},
+		{"quota.exceeded_speed_tx_mbps", "Throttle upload when quota exceeded (Mbps)", "1"},
+		{"quota.warning_percent", "Warning threshold (% of quota)", "90"},
+		{"bandwidth.poll_interval", "Poll interval (e.g. 5s, 10s)", "5s"},
+		{"docker.discovery_interval", "Discovery scan interval", "10s"},
 		{"timezone", "Timezone for midnight reset", "Asia/Kolkata"},
-		{"log_level", "Log level (debug/info/warn/error)", "info"},
-		{"cleanup_stale_hours", "Remove containers unseen for N hours", "72"},
-		{"history_retention_days", "Keep usage history for N days", "365"},
+		{"logging.level", "Log level (debug/info/warn/error)", "info"},
+		{"cleanup.stale_container_hours", "Remove containers unseen for N hours (0 to disable)", "72"},
+		{"history.retention_days", "Keep usage history for N days", "365"},
 	}
 
 	for _, p := range prompts {
@@ -222,20 +222,20 @@ func (c *CLI) Configure() {
 
 	switch alertChoice {
 	case "1":
-		cfgStr = replaceYAMLValue(cfgStr, "enabled", "false")
+		cfgStr = replaceYAMLValue(cfgStr, "webhook.enabled", "false")
 		fmt.Println("  ✓ Alerts: disabled")
 	case "2":
-		cfgStr = replaceYAMLValue(cfgStr, "enabled", "false")
+		cfgStr = replaceYAMLValue(cfgStr, "webhook.enabled", "false")
 		// Console logging is always on via logging.console
 		fmt.Println("  ✓ Alerts: console log (already enabled)")
 	case "3", "4":
-		cfgStr = replaceYAMLValue(cfgStr, "enabled", "true")
+		cfgStr = replaceYAMLValue(cfgStr, "webhook.enabled", "true")
 		fmt.Print("  Discord webhook URL: ")
 		whURL, _ := reader.ReadString('\n')
 		whURL = strings.TrimSpace(whURL)
 		if whURL != "" {
-			cfgStr = replaceYAMLValue(cfgStr, "url", whURL)
-			cfgStr = replaceYAMLValue(cfgStr, "enabled", "true")
+			cfgStr = replaceYAMLValue(cfgStr, "webhook.endpoints.url", whURL)
+			cfgStr = replaceYAMLValue(cfgStr, "webhook.enabled", "true")
 			fmt.Println("  ✓ Discord webhook configured")
 		}
 		if alertChoice == "3" {
@@ -251,10 +251,10 @@ func (c *CLI) Configure() {
 	apiChoice, _ := reader.ReadString('\n')
 	apiChoice = strings.TrimSpace(strings.ToLower(apiChoice))
 	if apiChoice == "y" || apiChoice == "yes" {
-		cfgStr = replaceYAMLValue(cfgStr, "enabled", "true")
+		cfgStr = replaceYAMLValue(cfgStr, "api.enabled", "true")
 		fmt.Println("  ✓ API enabled (token auto-generated on start)")
 	} else {
-		cfgStr = replaceYAMLValue(cfgStr, "enabled", "false")
+		cfgStr = replaceYAMLValue(cfgStr, "api.enabled", "false")
 		fmt.Println("  ✓ API disabled")
 	}
 
@@ -263,10 +263,10 @@ func (c *CLI) Configure() {
 	metChoice, _ := reader.ReadString('\n')
 	metChoice = strings.TrimSpace(strings.ToLower(metChoice))
 	if metChoice == "y" || metChoice == "yes" {
-		cfgStr = replaceYAMLValue(cfgStr, "enabled", "true")
+		cfgStr = replaceYAMLValue(cfgStr, "metrics.enabled", "true")
 		fmt.Println("  ✓ Metrics enabled on :9090/metrics")
 	} else {
-		cfgStr = replaceYAMLValue(cfgStr, "enabled", "false")
+		cfgStr = replaceYAMLValue(cfgStr, "metrics.enabled", "false")
 		fmt.Println("  ✓ Metrics disabled")
 	}
 
@@ -293,36 +293,101 @@ func (c *CLI) Configure() {
 }
 
 func extractYAMLValue(yamlStr, key string) string {
+	parts := strings.Split(key, ".")
 	lines := strings.Split(yamlStr, "\n")
+	currentSection := ""
+
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		// Only match actual key (not indented sub-keys)
-		if strings.HasPrefix(trimmed, key+":") && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
-			val := strings.TrimPrefix(trimmed, key+":")
-			// Strip inline YAML comments
-			if idx := strings.Index(val, "#"); idx >= 0 {
-				val = val[:idx]
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+
+		// Top-level line.
+		if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
+			sectionName := ""
+			if idx := strings.Index(trimmed, ":"); idx > 0 {
+				sectionName = trimmed[:idx]
 			}
-			val = strings.TrimSpace(val)
-			val = strings.Trim(val, "\"")
-			return val
+
+			if len(parts) == 1 {
+				// Looking for a top-level scalar like 'timezone: ...'.
+				if sectionName == parts[0] {
+					if val, ok := matchKeyValue(line, parts[0]); ok {
+						return val
+					}
+				}
+			}
+			currentSection = sectionName
+			continue
+		}
+
+		// Inside a section, look for the target key.
+		if len(parts) == 2 && currentSection == parts[0] {
+			if val, ok := matchKeyValue(line, parts[1]); ok {
+				return val
+			}
 		}
 	}
 	return ""
 }
 
 func replaceYAMLValue(yamlStr, key, newVal string) string {
+	parts := strings.Split(key, ".")
 	lines := strings.Split(yamlStr, "\n")
+	currentSection := ""
+
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		// Only match top-level keys (not indented sub-keys)
-		if strings.HasPrefix(trimmed, key+":") && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
-			prefix := line[:strings.Index(line, key)]
-			lines[i] = prefix + key + ": " + newVal
-			return strings.Join(lines, "\n")
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+
+		// Detect section headers.
+		if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
+			if idx := strings.Index(trimmed, ":"); idx > 0 {
+				currentSection = trimmed[:idx]
+			}
+			if len(parts) == 1 && currentSection == parts[0] {
+				// Replacing a top-level scalar like 'timezone: ...'.
+				lines[i] = replaceLineValue(line, parts[0], newVal)
+				return strings.Join(lines, "\n")
+			}
+			continue
+		}
+
+		if len(parts) == 2 && currentSection == parts[0] {
+			if matchKey(line, parts[1]) {
+				lines[i] = replaceLineValue(line, parts[1], newVal)
+				return strings.Join(lines, "\n")
+			}
 		}
 	}
 	return yamlStr
+}
+
+func matchKeyValue(line, key string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, key+":") {
+		return "", false
+	}
+	val := strings.TrimPrefix(trimmed, key+":")
+	if idx := strings.Index(val, "#"); idx >= 0 {
+		val = val[:idx]
+	}
+	val = strings.TrimSpace(val)
+	val = strings.Trim(val, "\"")
+	return val, true
+}
+
+func matchKey(line, key string) bool {
+	trimmed := strings.TrimSpace(line)
+	return strings.HasPrefix(trimmed, key+":")
+}
+
+func replaceLineValue(line, key, newVal string) string {
+	indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+	return indent + key + ": " + newVal
 }
 
 // Status fetches and displays daemon status.
@@ -519,17 +584,94 @@ func (c *CLI) Disable() {
 
 // Restart restarts the daemon.
 func (c *CLI) Restart() {
-	fmt.Println("Restarting daemon...")
+	if c.runSystemctl("restart") {
+		fmt.Println("Daemon restarted.")
+		return
+	}
+	c.directRestart()
 }
 
 // Stop stops the daemon.
 func (c *CLI) Stop() {
-	fmt.Println("Stopping daemon...")
+	if c.runSystemctl("stop") {
+		fmt.Println("Daemon stopped.")
+		return
+	}
+	c.directStop()
 }
 
 // Start starts the daemon.
 func (c *CLI) Start() {
-	fmt.Println("Starting daemon...")
+	if c.runSystemctl("start") {
+		fmt.Println("Daemon started.")
+		return
+	}
+	c.directStart()
+}
+
+// runSystemctl tries to control the systemd service. Returns true on success.
+func (c *CLI) runSystemctl(action string) bool {
+	cmd := exec.Command("systemctl", action, "bandwidth")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return false
+	}
+	if len(out) > 0 {
+		fmt.Print(string(out))
+	}
+	return true
+}
+
+// directStart starts bandwidthd in the background without systemd.
+func (c *CLI) directStart() {
+	if c.isDaemonRunning() {
+		fmt.Println("Daemon is already running.")
+		return
+	}
+	configPath := "/etc/bandwidth/config.yaml"
+	logFile := "/var/log/bandwidth/bandwidth.log"
+	cmd := exec.Command("nohup", "bandwidthd", "--config", configPath)
+	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		fmt.Printf("Error opening log file: %v\n", err)
+		return
+	}
+	defer f.Close()
+	cmd.Stdout = f
+	cmd.Stderr = f
+	cmd.Stdin = nil
+	if err := cmd.Start(); err != nil {
+		fmt.Printf("Error starting daemon: %v\n", err)
+		return
+	}
+	fmt.Printf("Daemon started (PID %d).\n", cmd.Process.Pid)
+}
+
+// directStop kills any running bandwidthd process.
+func (c *CLI) directStop() {
+	cmd := exec.Command("pkill", "-x", "bandwidthd")
+	if err := cmd.Run(); err != nil {
+		fmt.Println("No running daemon process found.")
+		return
+	}
+	fmt.Println("Daemon stopped.")
+}
+
+// directRestart restarts bandwidthd without systemd.
+func (c *CLI) directRestart() {
+	c.directStop()
+	time.Sleep(500 * time.Millisecond)
+	c.directStart()
+}
+
+// isDaemonRunning returns true if the daemon socket is connectable.
+func (c *CLI) isDaemonRunning() bool {
+	conn, err := net.Dial("unix", c.socketPath)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
 }
 
 // Logs shows daemon logs.
